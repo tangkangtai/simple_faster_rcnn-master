@@ -167,7 +167,7 @@ class VGG(nn.Module):
         N_reg = (gt_rpn_label > 0).float().sum()
         N_reg = np.squeeze(N_reg.data.numpy())
 
-        # print "N_reg: {}, {}".format(N_reg, N_reg.shape)
+        # print"N_reg: {}, {}".format(N_reg, N_reg.shape)
         rpn_loc_loss = rpn_loc_loss / N_reg
         rpn_loc_loss = np.float32(rpn_loc_loss)
         # rpn_loc_loss = torch.autograd.Variable(torch.from_numpy(rpn_loc_loss))
@@ -218,6 +218,7 @@ class VGG(nn.Module):
 if __name__ == '__main__':
     vgg = VGG()
     print(vgg)
+    # torch.randn(*size....)返回一个符合均值为0，方差为1的正态分布
     data = torch.randn((1, 3, 800, 800))
     print(data.shape)
     data = torch.autograd.Variable(data)

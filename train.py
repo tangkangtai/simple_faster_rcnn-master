@@ -17,7 +17,8 @@ import utils
 # 5. 固定尺寸的预测目标特征图通过坐标分类模型(self.cls_loc)获取置信度和预测框修正的坐标系数。
 
 # 假设 图片中的两个目标框"ground-truth"
-bbox = np.asarray([[20, 30, 400, 500], [300, 400, 500, 600]], dtype=np.float32) # [y1, x1, y2, x2] format
+bbox = np.asarray([[20, 30, 400, 500],
+                   [300, 400, 500, 600]], dtype=np.float32) # [y1, x1, y2, x2] format
 # 假设 图片中两个目标框分别对应的标签
 labels = np.asarray([6, 8], dtype=np.int8)  # 0 represents background
 
@@ -26,16 +27,18 @@ img_var = torch.autograd.Variable(img_tensor)
 
 
 # ---------------------step_1: 获取目标anchor的置信度（anchor_conf）和平移缩放系数（anchor_locations）
-# 初始化所有anchors, 并找出有效anchors和对应的index
+# 初始化所有anchors, 并找出有效anchors(即边框都在图片内的anchor)和对应的index(数组中满足条件的index)
+# 特征图 为50*50,每个中心对应9个anchor,即50*50*9=22500个
+# 有效的anchors,即去除坐标出界的边框，保留图片内的框——图片内框
 # anchors： (22500, 4)  valid_anchor_boxes： (8940, 4)  valid_anchor_index：8940
 anchors, valid_anchor_boxes, valid_anchor_index = utils.init_anchor()
 # 计算有效anchors与所有目标框的IOU
 # ious：（8940, 2) 每个有效anchor框与目标实体框的IOU
 ious = utils.compute_iou(valid_anchor_boxes, bbox)
+
 valid_anchor_len = len(valid_anchor_boxes)
 # 在有效框中找到一定比例的正例和负例
-label, argmax_ious = utils.get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,
-                                 neg_iou_threshold=0.3, pos_ratio=0.5, n_sample=256)
+label, argmax_ious = utils.get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,neg_iou_threshold=0.3, pos_ratio=0.5, n_sample=256)
 # print np.sum(label == 1)  # 18个正例
 # print np.sum(label == 0)  # 256-18=238个负例
 

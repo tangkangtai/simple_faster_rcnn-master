@@ -8,9 +8,10 @@ def init_anchor(img_size=800, sub_sample=16):
     anchor_scales = [8, 16, 32]  # 该尺寸是针对特征图的
 
     # 一个特征点对应原图片中的16*16个像素点区域, 'img_size // sub_sample'得到特征图的尺寸
-    feature_size = (img_size // sub_sample)
+    feature_size = (img_size // sub_sample) # 800//16 = 50
     # 这里相当于把图像分割成feature_size*feature_size的网格， 每个网格对应一个特征点。
     # ctr_x， ctr_y: 每个网格的右下方坐标
+    #               np.arange(16,(50+1)*16,16) 类似等差数列生成 数组
     ctr_x = np.arange(sub_sample, (feature_size + 1) * sub_sample, sub_sample)  # 共feature_size个
     ctr_y = np.arange(sub_sample, (feature_size + 1) * sub_sample, sub_sample)  # 共feature_size个
     # print len(ctr_x)  # 50
@@ -32,7 +33,9 @@ def init_anchor(img_size=800, sub_sample=16):
     # 将候选框的坐标赋值到anchors
     for c in ctr:
         ctr_y, ctr_x = ctr[c]
+
         for i in range(len(ratios)):
+
             for j in range(len(anchor_scales)):
                 # anchor_scales 是针对特征图的，所以需要乘以下采样"sub_sample"
                 h = sub_sample * anchor_scales[j] * np.sqrt(ratios[i])
@@ -61,9 +64,11 @@ def init_anchor(img_size=800, sub_sample=16):
 
 # 计算有效anchor框"valid_anchor_boxes"与目标框"bbox"的IOU
 def compute_iou(valid_anchor_boxes, bbox):
+
     valid_anchor_num = len(valid_anchor_boxes)
-    ious = np.empty((valid_anchor_num, 2), dtype=np.float32)
+    ious = np.empty((valid_anchor_num, 2), dtype=np.float32) # np.empty()依据给定形状和类型(shape,[dtype, order])返回一个新的空数组
     ious.fill(0)
+    # valid_anchor_boxes： (8940, 4)
     for num1, i in enumerate(valid_anchor_boxes):
         ya1, xa1, ya2, xa2 = i
         anchor_area = (ya2 - ya1) * (xa2 - xa1)  # anchor框面积
@@ -84,8 +89,9 @@ def compute_iou(valid_anchor_boxes, bbox):
 
     return ious
 
-
+# 在有效框中找到一定比例的正例和负例
 def get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,neg_iou_threshold=0.3, pos_ratio=0.5, n_sample=256):
+
     gt_argmax_ious = ious.argmax(axis=0)  # 找出每个目标实体框最大IOU的anchor框index，共2个, 与图片内目标框数量一致
     gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # 获取每个目标实体框最大IOU的值，与gt_argmax_ious对应, 共2个，与图片内目标框数量一致
     argmax_ious = ious.argmax(axis=1)  # 找出每个anchor框最大IOU的目标框index，共8940个, 每个anchor框都会对应一个最大IOU的目标框
