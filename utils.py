@@ -91,9 +91,10 @@ def compute_iou(valid_anchor_boxes, bbox):
 
 # 在有效框中找到一定比例的正例和负例
 def get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,neg_iou_threshold=0.3, pos_ratio=0.5, n_sample=256):
-
+    # numpy.argmax(axis=0) 返回每列最大值得索引,axis=1返回每行最大值的索引
     gt_argmax_ious = ious.argmax(axis=0)  # 找出每个目标实体框最大IOU的anchor框index，共2个, 与图片内目标框数量一致
     gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # 获取每个目标实体框最大IOU的值，与gt_argmax_ious对应, 共2个，与图片内目标框数量一致
+
     argmax_ious = ious.argmax(axis=1)  # 找出每个anchor框最大IOU的目标框index，共8940个, 每个anchor框都会对应一个最大IOU的目标框
     max_ious = ious[np.arange(valid_anchor_len), argmax_ious]  # 获取每个anchor框的最大IOU值， 与argmax_ious对应, 每个anchor框内都会有一个最大值
 
@@ -107,17 +108,18 @@ def get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,neg_iou_thr
     label[gt_argmax_ious] = 1  # anchor框有全局最大IOU值，设为1
     label[max_ious >= pos_iou_threshold] = 1  # anchor框内最大IOU值大于等于pos_iou_threshold，设为1
 
-    n_pos = pos_ratio * n_sample  # 正例样本数
+    n_pos = pos_ratio * n_sample  # 正例样本数 256 * 0.5
 
     # 随机获取n_pos个正例，
     pos_index = np.where(label == 1)[0]
+
     if len(pos_index) > n_pos:
         disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos), replace=False)
         label[disable_index] = -1
 
     n_neg = n_sample - np.sum(label == 1)
+    #
     neg_index = np.where(label == 0)[0]
-
     if len(neg_index) > n_neg:
         disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
         label[disable_index] = -1
@@ -259,12 +261,17 @@ def get_propose_target(roi, bbox, labels, n_sample=128, pos_ratio=0.25,
 
 def get_coefficient(anchor, bbox):
     # 根据上面得到的预测框和与之对应的目标框，计算4维参数（平移参数：dy, dx； 缩放参数：dh, dw）
+    # anchor( y1, x1, y2, x2)
     height = anchor[:, 2] - anchor[:, 0]
     width = anchor[:, 3] - anchor[:, 1]
+
+    # anchor中心
     ctr_y = anchor[:, 0] + 0.5 * height
     ctr_x = anchor[:, 1] + 0.5 * width
+    # bbox(ground-truth)
     base_height = bbox[:, 2] - bbox[:, 0]
     base_width = bbox[:, 3] - bbox[:, 1]
+
     base_ctr_y = bbox[:, 0] + 0.5 * base_height
     base_ctr_x = bbox[:, 1] + 0.5 * base_width
 

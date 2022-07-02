@@ -105,40 +105,28 @@ class VGG(nn.Module):
         #     # print data.data.shape
         #
         # # out = data.view(data.size(0), -1)
-        # self.rpn_conv = nn.Conv2d(in_channels, mid_channels, 3, 1, 1) #前面函数的,自己加的
         x = self.rpn_conv(out_map)
-
-        # self.reg_layer = nn.Conv2d(mid_channels, n_anchor * 4, 1, 1, 0) 前面函数里面的，自己加的
         pred_anchor_locs = self.reg_layer(x)  # 回归层，计算有效anchor转为目标框的四个系数
         pred_cls_scores = self.cls_layer(x)  # 分类层，判断该anchor是否可以捕获目标
 
         return out_map, pred_anchor_locs, pred_cls_scores
 
     def roi_classifier(self, class_num=20):  # 假设为VOC数据集，共20分类
-
-        # torch.nn.Linear(in_features,out_features) 用于设置网络中的全连接层的
-        # 全连接层的输入与输出一般都设置为二维张量 [batch_size, size]
-        # in_features指的是输入的二维张量的大小，即输入的[batch_size, size]中的size。
-        # out_features指的是输出的二维张量的大小，即输出的二维张量的形状为[batch_size，output_size]，当然，它也代表了该全连接层的神经元个数。
-        # 从输入输出的张量的shape角度来理解，相当于一个输入为[batch_size, in_features]的张量变换成了[batch_size, out_features]的输出张量。
-        # 分类层                                      #  (7*7)[proposal feature map]*512
+        # 分类层
         self.roi_head_classifier = nn.Sequential(*[nn.Linear(25088, 4096),
                                                    nn.ReLU(),
                                                    nn.Linear(4096, 4096),
                                                    nn.ReLU()])
         self.cls_loc = nn.Linear(4096, (class_num+1) * 4)  # (VOC 20 classes + 1 background. Each will have 4 co-ordinates)
-
-        # self.cls_loc 坐标分类模型
         self.cls_loc.weight.data.normal_(0, 0.01)
         self.cls_loc.bias.data.zero_()
 
-        # self.score 类别分类模型
+
         self.score = nn.Linear(4096, class_num+1)  # (VOC 20 classes + 1 background)
 
     def rpn_loss(self, rpn_loc, rpn_score, gt_rpn_loc, gt_rpn_label, weight=10.0):
         # 对与classification我们使用Cross Entropy损失
-        gt_rpn_label = torch.autograd.Variable(gt_rpn_label.long()) # torch.autograd.Variable用来包裹张量并记录应用的操作
-
+        gt_rpn_label = torch.autograd.Variable(gt_rpn_label.long())
         rpn_cls_loss = torch.nn.functional.cross_entropy(rpn_score, gt_rpn_label, ignore_index=-1)
         # print(rpn_cls_loss)  # Variable containing: 0.6931
 
@@ -148,7 +136,7 @@ class VGG(nn.Module):
         # print(mask.shape)  # (22500L, 4L)
 
         # 现在取有正数标签的边界区域
-        mask_pred_loc = rpn_loc[mask].view(-1, 4) # .view 类似tf.resize函数
+        mask_pred_loc = rpn_loc[mask].view(-1, 4)
         mask_target_loc = gt_rpn_loc[mask].view(-1, 4)
         # print(mask_pred_loc.shape, mask_target_loc.shape)  # ((18L, 4L), (18L, 4L))
 

@@ -33,7 +33,8 @@ img_var = torch.autograd.Variable(img_tensor)
 # anchors： (22500, 4)  valid_anchor_boxes： (8940, 4)  valid_anchor_index：8940
 anchors, valid_anchor_boxes, valid_anchor_index = utils.init_anchor()
 # 计算有效anchors与所有目标框的IOU
-# ious：（8940, 2) 每个有效anchor框与目标实体框的IOU
+# ious：(8940, 2) 每个有效anchor框与目标实体(ground-truth)框的IOU
+# 保存的tensor,即 每行表示，一个候选框与(假设为两个)每个ground-truth之间的iou
 ious = utils.compute_iou(valid_anchor_boxes, bbox)
 
 valid_anchor_len = len(valid_anchor_boxes)
@@ -51,7 +52,7 @@ max_iou_bbox = bbox[argmax_ious]  # 有效anchor框对应的目标框坐标  (89
 anchor_locs = utils.get_coefficient(valid_anchor_boxes, max_iou_bbox)
 # print(anchor_locs.shape)  # (8940, 4)  4维参数（平移参数：dy, dx； 缩放参数：dh, dw）
 
-# anchor_conf ： 所有anchor框对应的label（-1：无效anchor，0：负例有效anchor，1：正例有效anchor）
+# anchor_conf ： 所有anchor框对应的label(-1：无效anchor，0：负例有效anchor，1：正例有效anchor）
 anchor_conf = np.empty((len(anchors),), dtype=label.dtype)
 anchor_conf.fill(-1)
 anchor_conf[valid_anchor_index] = label
