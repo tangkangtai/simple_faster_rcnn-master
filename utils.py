@@ -7,7 +7,7 @@ def init_anchor(img_size=800, sub_sample=16):
     ratios = [0.5, 1, 2]
     anchor_scales = [8, 16, 32]  # 该尺寸是针对特征图的
 
-    # 一个特征点对应原图片中的16*16个像素点区域, 'img_size // sub_sample'得到特征图的尺寸
+    # 一个 特征点 对应原图片中的16*16个像素点区域, 'img_size // sub_sample'得到特征图的尺寸
     feature_size = (img_size // sub_sample) # 800//16 = 50
     # 这里相当于把图像分割成feature_size*feature_size的网格， 每个网格对应一个特征点。
     # ctr_x， ctr_y: 每个网格的右下方坐标
@@ -25,25 +25,37 @@ def init_anchor(img_size=800, sub_sample=16):
             ctr[index][1] = ctr_x[x] - 8  # 右下角坐标 - 8 = 中心坐标
             ctr[index][0] = ctr_y[y] - 8
             index += 1
-    # print len(ctr)  # 将原图片分割成50*50=2500(feature_size*feature_size)个区域的中心点
+    # print(len(ctr))
+    # print(ctr)# 将原图片分割成50*50=2500(feature_size*feature_size)个区域的中心点  ctr: {0:[8,8], 1:[24,8], 2:[40,8]....}
 
     # 初始化：每个区域有9个anchors候选框，每个候选框的坐标(y1, x1, y2, x2)
     anchors = np.zeros(((feature_size * feature_size * 9), 4))  # (22500, 4)
     index = 0
     # 将候选框的坐标赋值到anchors
     for c in ctr:
+        # print("c = ", c) # c = 0, 1, 2, 3, 4.....2500
         ctr_y, ctr_x = ctr[c]
 
         for i in range(len(ratios)):
 
             for j in range(len(anchor_scales)):
                 # anchor_scales 是针对特征图的，所以需要乘以下采样"sub_sample"
-                h = sub_sample * anchor_scales[j] * np.sqrt(ratios[i])
+                # sub_sample=16 # ratios = [0.5, 1, 2]
+                # anchor_scales = [8, 16, 32]  # 该尺寸是针对特征图的
+
+                # size_ratios = (w * h)/ratio ——> (16*16)/[0.5,1,2] = [512,256,128] 自己备注
+                # ws = np.round(np.sqrt(size_ratios)) # ws: [23,16,11]   自己备注
+                # hs = np.round(ws * ratios)          # hs: [12 16 22]   自己备注
+
+
+                h = sub_sample * anchor_scales[j] * np.sqrt(ratios[i])  # h = w * ratios
                 w = sub_sample * anchor_scales[j] * np.sqrt(1. / ratios[i])
+
                 anchors[index, 0] = ctr_y - h / 2.
                 anchors[index, 1] = ctr_x - w / 2.
                 anchors[index, 2] = ctr_y + h / 2.
                 anchors[index, 3] = ctr_x + w / 2.
+
                 index += 1
 
     # 去除坐标出界的边框，保留图片内的框——图片内框
@@ -53,11 +65,12 @@ def init_anchor(img_size=800, sub_sample=16):
         (anchors[:, 2] <= 800) &
         (anchors[:, 3] <= 800)
     )[0]  # 该函数返回数组中满足条件的index
+    # print(valid_anchor_index)  # 返回满足条件的下标
     # print valid_anchor_index.shape  # (8940,)，表明有8940个框满足条件
 
-    # 获取有效anchor（即边框都在图片内的anchor）的坐标
+    # 获取有效anchor（即边框都在图片内的anchor)的坐标
     valid_anchor_boxes = anchors[valid_anchor_index]
-    # print(valid_anchor_boxes.shape)  # (8940, 4)
+    # print(valid_anchor_boxes.shape)  # (8940, 4)  # 保存着有效anchor的坐标
 
     return anchors, valid_anchor_boxes, valid_anchor_index
 
@@ -68,17 +81,24 @@ def compute_iou(valid_anchor_boxes, bbox):
     valid_anchor_num = len(valid_anchor_boxes)
     ious = np.empty((valid_anchor_num, 2), dtype=np.float32) # np.empty()依据给定形状和类型(shape,[dtype, order])返回一个新的空数组
     ious.fill(0)
+
     # valid_anchor_boxes： (8940, 4)
     for num1, i in enumerate(valid_anchor_boxes):
         ya1, xa1, ya2, xa2 = i
+
         anchor_area = (ya2 - ya1) * (xa2 - xa1)  # anchor框面积
+
         for num2, j in enumerate(bbox):
+
             yb1, xb1, yb2, xb2 = j
+
             box_area = (yb2 - yb1) * (xb2 - xb1)  # 目标框面积
+
             inter_x1 = max([xb1, xa1])
             inter_y1 = max([yb1, ya1])
             inter_x2 = min([xb2, xa2])
             inter_y2 = min([yb2, ya2])
+
             if (inter_x1 < inter_x2) and (inter_y1 < inter_y2):
                 iter_area = (inter_y2 - inter_y1) * (inter_x2 - inter_x1)  # anchor框和目标框的相交面积
                 iou = iter_area / (anchor_area + box_area - iter_area)  # IOU计算
@@ -90,17 +110,26 @@ def compute_iou(valid_anchor_boxes, bbox):
     return ious
 
 # 在有效框中找到一定比例的正例和负例
+# ious：(8940, 2) 每个有效anchor框与目标实体(ground-truth)框的IOU
+# 保存的tensor,即 每行表示，一个候选框与(假设为两个)每个ground-truth之间的iou
+# valid_anchor_index：8940
 def get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,neg_iou_threshold=0.3, pos_ratio=0.5, n_sample=256):
     # numpy.argmax(axis=0) 返回每列最大值得索引,axis=1返回每行最大值的索引
-    gt_argmax_ious = ious.argmax(axis=0)  # 找出每个目标实体框最大IOU的anchor框index，共2个, 与图片内目标框数量一致
-    gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # 获取每个目标实体框最大IOU的值，与gt_argmax_ious对应, 共2个，与图片内目标框数量一致
-
+    # 二维数据拥有两个轴：第0轴沿着行的垂直往下，第1轴沿着列的方向水平延伸。
+    gt_argmax_ious = ious.argmax(axis=0)  # 找出每个目标实体框(ground-truth)最大IOU的anchor框index，共2个, 与图片内目标框数量一致
+    gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # 获取每个目标实体框(ground-truth)最大IOU的值,与gt_argmax_ious对应, 共2个,与图片内目标框数量一致
+    # print('gt_max_ious.shape:', gt_max_ious.shape) #(2,)
     argmax_ious = ious.argmax(axis=1)  # 找出每个anchor框最大IOU的目标框index，共8940个, 每个anchor框都会对应一个最大IOU的目标框
     max_ious = ious[np.arange(valid_anchor_len), argmax_ious]  # 获取每个anchor框的最大IOU值， 与argmax_ious对应, 每个anchor框内都会有一个最大值
 
     gt_argmax_ious = np.where(ious == gt_max_ious)[0]  # 根据上面获取的目标最大IOU值，获取等于该值的index
+    # gt_argmax_ious1 = np.where(ious == gt_max_ious) # 元组(大小为:2, 两个数组)//即保存着满足条件的坐标,第一个数组为行坐标，第二个数组为列坐标
+    # print(gt_argmax_ious1)
+    # print(len(gt_argmax_ious1))
+    # 根据上面获取的目标最大IOU值，获取等于该值的index
     # print gt_argmax_ious.shape  # (18,) 共计18个
 
+    # valid_anchor_index：8940
     label = np.empty((valid_anchor_len,), dtype=np.int32)
     label.fill(-1)
     # print label.shape  # (8940,)
@@ -108,18 +137,23 @@ def get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,neg_iou_thr
     label[gt_argmax_ious] = 1  # anchor框有全局最大IOU值，设为1
     label[max_ious >= pos_iou_threshold] = 1  # anchor框内最大IOU值大于等于pos_iou_threshold，设为1
 
-    n_pos = pos_ratio * n_sample  # 正例样本数 256 * 0.5
+    n_pos = pos_ratio * n_sample  # 正例样本数 256 * 0.5 = 128
 
     # 随机获取n_pos个正例，
     pos_index = np.where(label == 1)[0]
+    # pos_index1 = np.where(label == 1)                 # 自己测试备注
+    # pos_index2 = np.where(label == 1)[0]              # 自己测试备注
+    # print('pos_index1 = ', pos_index1)                # 自己测试备注
+    # print('pos_index2 = ', pos_index2)                # 自己测试备注
 
     if len(pos_index) > n_pos:
         disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos), replace=False)
         label[disable_index] = -1
 
     n_neg = n_sample - np.sum(label == 1)
-    #
+
     neg_index = np.where(label == 0)[0]
+
     if len(neg_index) > n_neg:
         disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
         label[disable_index] = -1
@@ -127,6 +161,9 @@ def get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,neg_iou_thr
     return label, argmax_ious
 
 
+# anchors： (22500, 4)
+# pred_anchor_locs: RPN网络预测anchor的坐标系数: (1, 22500, 4)
+# objectness_score: Out torch.Size([1, 22500])
 def get_predict_bbox(anchors, pred_anchor_locs, objectness_score, n_train_pre_nms=12000, min_size=16):
     # 转换anchor格式从 y1, x1, y2, x2 到 ctr_x, ctr_y, h, w ：
     anc_height = anchors[:, 2] - anchors[:, 0]
@@ -137,36 +174,47 @@ def get_predict_bbox(anchors, pred_anchor_locs, objectness_score, n_train_pre_nm
     # 根据预测的四个系数，将anchor框通过平移和缩放转化为预测的目标框
     pred_anchor_locs_numpy = pred_anchor_locs[0].data.numpy()
     objectness_score_numpy = objectness_score[0].data.numpy()
-    dy = pred_anchor_locs_numpy[:, 0::4]
-    dx = pred_anchor_locs_numpy[:, 1::4]
-    dh = pred_anchor_locs_numpy[:, 2::4]
-    dw = pred_anchor_locs_numpy[:, 3::4]
+    dy = pred_anchor_locs_numpy[:, 0::4] # 取第一列
+    dx = pred_anchor_locs_numpy[:, 1::4] # 取第二列
+    dh = pred_anchor_locs_numpy[:, 2::4] # 取第三列
+    dw = pred_anchor_locs_numpy[:, 3::4] # 取第四列
+
+    # np.newaxis的作用就是选取部分的数据增加一个维度
     ctr_y = dy * anc_height[:, np.newaxis] + anc_ctr_y[:, np.newaxis]
     ctr_x = dx * anc_width[:, np.newaxis] + anc_ctr_x[:, np.newaxis]
     h = np.exp(dh) * anc_height[:, np.newaxis]
     w = np.exp(dw) * anc_width[:, np.newaxis]
 
     #  将预测的目标框转换为[y1, x1, y2, x2]格式
+    # pred_anchor_locs_numpy = (22500,4)
     roi = np.zeros(pred_anchor_locs_numpy.shape, dtype=pred_anchor_locs_numpy.dtype)
     roi[:, 0::4] = ctr_y - 0.5 * h
     roi[:, 1::4] = ctr_x - 0.5 * w
     roi[:, 2::4] = ctr_y + 0.5 * h
     roi[:, 3::4] = ctr_x + 0.5 * w
+    # roi 中保存着预测的目标框的坐标(22500,4),   坐标形式(y1,x1,y2,x2) ,自己备注
 
     # 保证预测框的坐标全部落在图片中，y1,y2在（0, img_size[0]）之间, x1,x2在（0, img_size[1]）之间
     img_size = (800, 800)  # Image size
+    # slice(start, stop, step)
+    # np.clip(a,a_min,a_max) 将将数组中的元素限制在a_min, a_max之间，
+    # 大于a_max的就使得它等于 a_max，小于a_min,的就使得它等于a_min.
     roi[:, slice(0, 4, 2)] = np.clip(roi[:, slice(0, 4, 2)], 0, img_size[0])
     roi[:, slice(1, 4, 2)] = np.clip(roi[:, slice(1, 4, 2)], 0, img_size[1])
     # print(roi.shape)  # (22500, 4)
 
     #  去除高度或宽度 < threshold的预测框 （疑问：这样会不会忽略小目标）
+    # (y1, x1, y2, x2)
     hs = roi[:, 2] - roi[:, 0]
     ws = roi[:, 3] - roi[:, 1]
+    # min_size = 16
     keep = np.where((hs >= min_size) & (ws >= min_size))[0]
     roi = roi[keep, :]
-    score = objectness_score_numpy[keep]
+    score = objectness_score_numpy[keep] # objectness_score_numpy = (22500)
 
     # 按分数从高到低排序所有的（proposal, score）对
+    # ravel()方法将数组维度拉成一维数组
+    # argsort() 从小到大排序，返回索引数组
     order = score.ravel().argsort()[::-1]   # (22500,)
     # 取前几个预测框pre_nms_topN(如训练时12000，测试时300)
     order = order[:n_train_pre_nms]
@@ -175,6 +223,10 @@ def get_predict_bbox(anchors, pred_anchor_locs, objectness_score, n_train_pre_nm
 
 # torch.masked_select()
 
+
+# roi 中保存着预测的目标框的坐标(有效的，去除了高度宽度低于阈值的)
+# score (有效框的分数)
+# 训练时order返回前12000个分数高的
 def nms(roi, score, order, nms_thresh=0.7, n_train_post_nms=2000):
     # nms（非极大抑制）计算： (去除和极大值anchor框IOU大于0.7的框——即去除相交的框，保留score大，且基本无相交的框)
     roi = roi[order, :]  # (12000, 4)
@@ -192,19 +244,25 @@ def nms(roi, score, order, nms_thresh=0.7, n_train_post_nms=2000):
     keep = []
     while order.size > 0:
         # print order
-        i = order[0]
-        keep.append(i)
+        i = order[0] # i 是还未处理的图片中的最大评分
+        keep.append(i)  # 保留改图片的值
+
+        # 图片i分别与其余图片相交的矩形的坐标
         xx1 = np.maximum(x1[i], x1[order[1:]])
         yy1 = np.maximum(y1[i], y1[order[1:]])
+
         xx2 = np.minimum(x2[i], x2[order[1:]])
         yy2 = np.minimum(y2[i], y2[order[1:]])
 
+        # 计算出各个相交矩形的面积
         w = np.maximum(0.0, xx2 - xx1 + 1)
         h = np.maximum(0.0, yy2 - yy1 + 1)
         inter = w * h
+        # 计算重叠比例
         ovr = inter / (areas[i] + areas[order[1:]] - inter)
 
         # print ovr
+        # 只保留比例小于阈值的图片，然后继续处理
         inds = np.where(ovr <= nms_thresh)[0]
         # print inds
         order = order[inds + 1]  # 这里加1是因为在计算IOU时，把序列的第一个忽略了（如上面的order[1:]）
@@ -265,9 +323,10 @@ def get_coefficient(anchor, bbox):
     height = anchor[:, 2] - anchor[:, 0]
     width = anchor[:, 3] - anchor[:, 1]
 
-    # anchor中心
+    # 计算anchor中心,左上角为基坐标
     ctr_y = anchor[:, 0] + 0.5 * height
     ctr_x = anchor[:, 1] + 0.5 * width
+
     # bbox(ground-truth)
     base_height = bbox[:, 2] - bbox[:, 0]
     base_width = bbox[:, 3] - bbox[:, 1]
@@ -275,16 +334,19 @@ def get_coefficient(anchor, bbox):
     base_ctr_y = bbox[:, 0] + 0.5 * base_height
     base_ctr_x = bbox[:, 1] + 0.5 * base_width
 
+    # np.finfo使用方法eps是一个很小的非负数除法的分母不能为0的,不然会直接跳出显示错误。使用eps将可能出现的零用eps来替换，这样不会报错
     eps = np.finfo(height.dtype).eps
     height = np.maximum(height, eps)
     width = np.maximum(width, eps)
-
+    # positive anchor——> ground-truth 之间平移量(dx,dy)，尺度因子dh,dw   [faster-RCNN 文章中]
     dy = (base_ctr_y - ctr_y) / height
+    # print('dy: ', dy)
     dx = (base_ctr_x - ctr_x) / width
     dh = np.log(base_height / height)
     dw = np.log(base_width / width)
-
+    # numpy.vstack()垂直堆叠, transpose() 根据维度参数转置,
     gt_roi_locs = np.vstack((dy, dx, dh, dw)).transpose()
+    # print('gt_roi_locs: ', gt_roi_locs)
     # print(gt_roi_locs.shape)
 
     return gt_roi_locs

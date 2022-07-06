@@ -17,12 +17,12 @@ import utils
 # 5. 固定尺寸的预测目标特征图通过坐标分类模型(self.cls_loc)获取置信度和预测框修正的坐标系数。
 
 # 假设 图片中的两个目标框"ground-truth"
-bbox = np.asarray([[20, 30, 400, 500],
-                   [300, 400, 500, 600]], dtype=np.float32) # [y1, x1, y2, x2] format
+bbox = np.asarray([[20, 30, 400, 500],[300, 400, 500, 600]], dtype=np.float32) # [y1, x1, y2, x2] format
 # 假设 图片中两个目标框分别对应的标签
 labels = np.asarray([6, 8], dtype=np.int8)  # 0 represents background
+# print("labels = ", labels) # labels = [6,8]
+img_tensor = torch.zeros((1, 3, 800, 800)).float() # (N,C,W,H)
 
-img_tensor = torch.zeros((1, 3, 800, 800)).float()
 img_var = torch.autograd.Variable(img_tensor)
 
 
@@ -32,35 +32,54 @@ img_var = torch.autograd.Variable(img_tensor)
 # 有效的anchors,即去除坐标出界的边框，保留图片内的框——图片内框
 # anchors： (22500, 4)  valid_anchor_boxes： (8940, 4)  valid_anchor_index：8940
 anchors, valid_anchor_boxes, valid_anchor_index = utils.init_anchor()
+
 # 计算有效anchors与所有目标框的IOU
 # ious：(8940, 2) 每个有效anchor框与目标实体(ground-truth)框的IOU
 # 保存的tensor,即 每行表示，一个候选框与(假设为两个)每个ground-truth之间的iou
 ious = utils.compute_iou(valid_anchor_boxes, bbox)
 
 valid_anchor_len = len(valid_anchor_boxes)
+
 # 在有效框中找到一定比例的正例和负例
+# label,一维数组中保存着(-1,0,1)对应着正负样本,-1为抛弃的样本
+# argmax_ious 保存每个anchor框最大IOU的目标框index，共8940个, 每个anchor框都会对应一个最大IOU的目标框 [不是第一个(0)，就是第二个(1)]
 label, argmax_ious = utils.get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,neg_iou_threshold=0.3, pos_ratio=0.5, n_sample=256)
 # print np.sum(label == 1)  # 18个正例
 # print np.sum(label == 0)  # 256-18=238个负例
+# print('argmax_ious', argmax_ious) # [ 0 0 0 0 0.... 0 0 0]
+# print('argmax_ious.shape', argmax_ious.shape) # (8940, )
 
 # 现在让我们用具有最大iou的ground truth对象为每个anchor box分配位置。
 # 注意，我们将为所有有效的anchor box分配anchor locs，而不考虑其标签，稍后在计算损失时，我们可以使用简单的过滤器删除它们。
-# 每个有效anchor对应的目标框bbox
+# 获取每个有效anchor对应的目标框bbox  # 自己备注
 max_iou_bbox = bbox[argmax_ious]  # 有效anchor框对应的目标框坐标  (8940, 4)
+
 # print max_iou_bbox.shape  # (8940, 4)，共有8940个有效anchor框，每个anchor有坐标值（y1, x1, y2, x2）
 # 为所有有效的anchor_box分配anchor_locs，anchor_locs是每个有效的anchors转为对应目标框（bbox）的平移缩放系数
 anchor_locs = utils.get_coefficient(valid_anchor_boxes, max_iou_bbox)
 # print(anchor_locs.shape)  # (8940, 4)  4维参数（平移参数：dy, dx； 缩放参数：dh, dw）
 
-# anchor_conf ： 所有anchor框对应的label(-1：无效anchor，0：负例有效anchor，1：正例有效anchor）
+# anchor_conf:所有anchor框对应的label(-1：无效anchor, 0：负例有效anchor, 1：正例有效anchor）
 anchor_conf = np.empty((len(anchors),), dtype=label.dtype)
 anchor_conf.fill(-1)
+
+# label,一维数组中保存着(-1,0,1)对应着正负样本,-1为抛弃的样本
+# valid_anchor_index：8940
 anchor_conf[valid_anchor_index] = label
+# print(anchor_conf) #[-1 -1......-1 -1]
+
 print(anchor_conf.shape)  # 所有anchor对应的label（feature_size*feature_size*9）=》 (22500,)
 
 # anchor_locations： 所有anchor框转为目标实体框的系数，无效anchor系数全部为0，有效anchor有有效系数
+# anchors = (22500,4)
+# anchor_locations = (22500,4)
 anchor_locations = np.empty((len(anchors),) + anchors.shape[1:], dtype=anchor_locs.dtype)
 anchor_locations.fill(0)
+# valid_anchor_index：(8940,)
+# print('valid_anchor_index = ', valid_anchor_index)
+# print(type(valid_anchor_index)) # <numpy.ndarray>
+# anchor_locs.shape = (8940,4)
+
 anchor_locations[valid_anchor_index, :] = anchor_locs
 print(anchor_locations.shape)  # 所有anchor对应的平移缩放系数（feature_size*feature_size*9，4）=》(22500, 4)
 
@@ -75,12 +94,15 @@ out_map, pred_anchor_locs, pred_anchor_conf = vgg.forward(img_var)
 print(out_map.data.shape)  # (batch_size, num, feature_size, feature_size) => (1, 512, 50, 50)
 
 # 1. pred_anchor_locs 预测每个anchor框到目标框转化的系数（平移缩放），与 anchor_locations对应
+# permute将tensor的维度换位
+# contiguous() 转换为深拷贝, transpose()浅拷贝，即y变，x也变
 pred_anchor_locs = pred_anchor_locs.permute(0, 2, 3, 1).contiguous().view(1, -1, 4)
 print(pred_anchor_locs.shape)  # Out: torch.Size([1, 22500, 4])
 
 # 2. 预测anchor框的置信度，每个anchor框都会对应一个置信度，与 anchor_conf对应
+# (1,18,50,50)
 pred_anchor_conf = pred_anchor_conf.permute(0, 2, 3, 1).contiguous()
-print(pred_anchor_conf.shape)  # Out torch.Size([1, 50, 50, 18])
+print(pred_anchor_conf.shape)  # Out torch.Size([1, 50, 50, 18]) # //(1,18,50,50)——>(1,18,50,50)
 objectness_score = pred_anchor_conf.view(1, 50, 50, 9, 2)[:, :, :, :, 1].contiguous().view(1, -1)
 print(objectness_score.shape)  # Out torch.Size([1, 22500])
 
@@ -92,17 +114,21 @@ print(pred_anchor_conf.shape)  # Out torch.size([1, 22500, 2])
 # ---------------------step_3: RPN 损失 （有效anchor与预测anchor之间的损失--坐标系数损失与置信度损失）
 # 从上面step_1中，我们得到了目标anchor信息：
 # 目标anchor坐标系数：anchor_locations  (22500, 4)
-# 目标anchor置信度：anchor_conf  (22500,)
+# 目标anchor置信度：anchor_conf  (22500,) , 所有anchor框对应的label(-1：无效anchor，0：负例有效anchor，1：正例有效anchor）
 
 # 从上面step_2中，我们得到了预测anchor信息：
 # RPN网络预测anchor的坐标系数：pred_anchor_locs  (1, 22500, 4)
 # RPN网络预测anchor的置信度: pred_anchor_conf  (1, 22500, 2)
 
 # 我们将会从新排列，将输入和输出排成一行
-rpn_anchor_loc = pred_anchor_locs[0]
+rpn_anchor_loc = pred_anchor_locs[0] # (22500,4) ?
 rpn_anchor_conf = pred_anchor_conf[0]
+# torch.from_numpy(ndarray)
+# The returned tensor and ndarray share the same memory.
+# Modifications to the tensor will be reflected in the ndarray and vice versa.
 anchor_locations = torch.from_numpy(anchor_locations)
 anchor_conf = torch.from_numpy(anchor_conf)
+
 print(rpn_anchor_loc.shape, rpn_anchor_conf.shape, anchor_locations.shape, anchor_conf.shape)
 # torch.Size([22500, 4]) torch.Size([22500, 2]) torch.Size([22500, 4]) torch.Size([22500])
 
@@ -111,11 +137,13 @@ print("rpn_loss: {}".format(rpn_loss))  # 1.33919
 # ---------------------
 
 
-# ---------------------step_4: 根据anchor和预测anchor系数，计算预测框（roi）和预测框的坐标系数(roi_locs)，
+# ---------------------step_4: 根据anchor和预测anchor系数，计算预测框(roi)和预测框的坐标系数(roi_locs)，
 # ---------------------并得到每个预测框的所属类别label(roi_labels)
-# 通过anchors框和模型预测的平移缩放系数，得到预测框ROI；再通过预测的分值和阈值进行过滤精简
-roi, score, order = utils.get_predict_bbox(anchors, pred_anchor_locs, objectness_score,
-                                           n_train_pre_nms=12000, min_size=16)
+# 通过anchors框和模型预测的平移缩放系数，得到预测框ROI;再通过预测的分值和阈值进行过滤精简
+# 训练时order返回前12000个分数高的
+# roi 中保存着预测的目标框的坐标(有效的，去除了高度宽度低于阈值的)
+# score (有效框的分数)
+roi, score, order = utils.get_predict_bbox(anchors, pred_anchor_locs, objectness_score, n_train_pre_nms=12000, min_size=16)
 
 # 得到的预测框（ROI）还会有大量重叠，再通过NMS（非极大抑制）做进一步的过滤精简
 roi = utils.nms(roi, score, order, nms_thresh=0.7, n_train_post_nms=2000)
