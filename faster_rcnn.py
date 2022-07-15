@@ -90,7 +90,7 @@ print(anchors.shape)
 img_npy = img_tensor.numpy() #(1, 3, 800, 800) c,w,h
 img_npy = np.transpose(img_npy[0], (1, 2, 0)).astype(np.float32) # (h,c,w)——>(c,h,w)——>(3,800,800)
 img = Image.fromarray(np.uint8(img_npy)) #array转换成image
-img.show() # 显示图片
+# img.show() # 显示图片
 draw = ImageDraw.Draw(img)
 
 for index in range(15000, 15009):
@@ -99,13 +99,13 @@ for index in range(15000, 15009):
     # xy:[[x0，y0)，(x1，y1)]或[x0，y0，x1，y1]的序列
     # outline: 用于画轮廓的颜色
     # fill: 填充的颜色
-    draw.rectangle([(anchors[index, 1], anchors[index, 0]), (anchors[index, 3], anchors[index, 2])], outline=(255, 0, 0))
+    draw.rectangle([(anchors[index, 1], anchors[index, 0]), (anchors[index, 3], anchors[index, 2])], outline=(255, 0, 0)), #  9个红色框
 img.show()
 
 # 假设 图片中的两个目标框"ground-truth"
 bbox = np.asarray([[20, 30, 400, 500], [300, 400, 500, 600]], dtype=np.float32) # [y1, x1, y2, x2] format
 draw.rectangle([(30, 20), (500, 400)], outline=(100, 255, 0))
-draw.rectangle([(400, 300), (600, 500)], outline=(100, 255, 0))
+draw.rectangle([(400, 300), (600, 500)], outline=(100, 255, 0)) # 绿色框
 
 # 假设 图片中两个目标框分别对应的标签
 labels = np.asarray([6, 8], dtype=np.int8)  # 0 represents background
@@ -170,126 +170,139 @@ print(max_ious.shape)  # (8940,),每个anchor框内都会有一个最大值
 #          gt_max_ious中保存是 每个 gt-bbox 与 有效anchors框的 最大iou值 (2,)
 gt_argmax_ious = np.where(ious == gt_max_ious)[0]  # 根据上面获取的目标最大IOU值，获取等于该值的index
 print(gt_argmax_ious.shape)  # (18,) 共计18个
-# for index in gt_argmax_ious:
-#     draw.rectangle([(valid_anchor_boxes[index, 1], valid_anchor_boxes[index, 0]),
-#                     (valid_anchor_boxes[index, 3], valid_anchor_boxes[index, 2])], outline=(255, 0, 0))
-# img.show()
+for index in gt_argmax_ious:
+    draw.rectangle([(valid_anchor_boxes[index, 1], valid_anchor_boxes[index, 0]),
+                    (valid_anchor_boxes[index, 3], valid_anchor_boxes[index, 2])], outline=(0, 0, 205)) #设置为蓝色框
+img.show()
 #
-#
-# pos_iou_threshold = 0.7
-# neg_iou_threshold = 0.3
-# label = np.empty((len(valid_anchor_index), ), dtype=np.int32)
-# label.fill(-1)
-# print(label.shape)  # (8940,)
-# label[max_ious < neg_iou_threshold] = 0  # anchor框内最大IOU值小于neg_iou_threshold，设为0
-# label[gt_argmax_ious] = 1  # anchor框有全局最大IOU值，设为1
-# label[max_ious >= pos_iou_threshold] = 1  # anchor框内最大IOU值大于等于pos_iou_threshold，设为1
-#
-#
-#
-# pos_ratio = 0.5
-# n_sample = 256
-# n_pos = pos_ratio * n_sample  # 正例样本数
-#
-# # 随机获取n_pos个正例，
-# pos_index = np.where(label == 1)[0]
-# if len(pos_index) > n_pos:
-#    disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos), replace=False)
-#    label[disable_index] = -1
-#
-# n_neg = n_sample - np.sum(label == 1)
-# neg_index = np.where(label == 0)[0]
-#
-# if len(neg_index) > n_neg:
-#    disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace = False)
-#    label[disable_index] = -1
-# print(np.sum(label == 1))  # 18个正例
-# print(np.sum(label == 0))  # 256-18=238个负例
-#
-#
-# # 现在让我们用具有最大iou的ground truth对象为每个anchor box分配位置。
-# # 注意，我们将为所有有效的anchor box分配anchor locs，而不考虑其标签，稍后在计算损失时，我们可以使用简单的过滤器删除它们。
-# max_iou_bbox = bbox[argmax_ious]  # 有效anchor框对应的目标框坐标  (8940, 4)
-# print(max_iou_bbox)
-# print(max_iou_bbox.shape)  # (8940, 4)，共有8940个有效anchor框，每个anchor有坐标值（y1, x1, y2, x2）
-#
-# # 有效anchor的中心点和宽高：ctr_x, ctr_y, width, height
-# height = valid_anchor_boxes[:, 2] - valid_anchor_boxes[:, 0]
-# width = valid_anchor_boxes[:, 3] - valid_anchor_boxes[:, 1]
-# ctr_y = valid_anchor_boxes[:, 0] + 0.5 * height
-# ctr_x = valid_anchor_boxes[:, 1] + 0.5 * width
-# # 有效anchor对应目标框的中心点和宽高: base_ctr_x, base_ctr_y, base_width, base_height
-# base_height = max_iou_bbox[:, 2] - max_iou_bbox[:, 0]
-# base_width = max_iou_bbox[:, 3] - max_iou_bbox[:, 1]
-# base_ctr_y = max_iou_bbox[:, 0] + 0.5 * base_height
-# base_ctr_x = max_iou_bbox[:, 1] + 0.5 * base_width
-#
+# 正负样本
+pos_iou_threshold = 0.7
+neg_iou_threshold = 0.3
+
+label = np.empty((len(valid_anchor_index), ), dtype=np.int32)
+label.fill(-1)
+print(label.shape)  # (8940,)
+
+label[max_ious < neg_iou_threshold] = 0  # anchor框内最大IOU值小于neg_iou_threshold，设为0
+label[gt_argmax_ious] = 1  # anchor框有全局最大IOU值，设为1 # gt_argmax_ious.shape 18个
+label[max_ious >= pos_iou_threshold] = 1  # anchor框内最大IOU值大于等于pos_iou_threshold，设为1
+print('iou的值大于0的个数: ', np.where(label>0)[0].shape) # 18个
+
+
+pos_ratio = 0.5
+n_sample = 256
+n_pos = pos_ratio * n_sample  # 正例样本数 256*0.5=128个
+
+# 随机获取n_pos个正例，
+pos_index = np.where(label == 1)[0]
+print('len(pos_index): ', len(pos_index)) # 18个正例
+
+if len(pos_index) > n_pos: # 如果正例样本数少于正例数，则随机选择 整理样本个数
+   disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos), replace=False)
+   label[disable_index] = -1
+
+n_neg = n_sample - np.sum(label == 1)
+neg_index = np.where(label == 0)[0]
+
+if len(neg_index) > n_neg:
+   disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace = False)
+   label[disable_index] = -1
+
+print(np.sum(label == 1))  # 18个正例
+print(np.sum(label == 0))  # 256-18=238个负例
+
+
+# 现在让我们用具有最大iou的ground truth对象为每个anchor box分配位置。
+# 注意，我们将为所有有效的anchor box分配anchor locs，而不考虑其标签，稍后在计算损失时，我们可以使用简单的过滤器删除它们。
+# argmax_ious:(8940,) ious中每行(表示每个anchor)对应的最大iou的gt-bbox
+max_iou_bbox = bbox[argmax_ious]  # 有效anchor框对应的目标框坐标  (8940, 4)
+# print(max_iou_bbox) # 保存的所有的anchor对应的最大iou的gt-bbox的gt-bbox坐标
+print(max_iou_bbox.shape)  # (8940, 4)，共有8940个有效anchor框，每个anchor有坐标值（y1, x1, y2, x2）
+
+# 有效anchor的中心点和宽高：ctr_x, ctr_y, width, height
+height = valid_anchor_boxes[:, 2] - valid_anchor_boxes[:, 0]
+width = valid_anchor_boxes[:, 3] - valid_anchor_boxes[:, 1]
+ctr_y = valid_anchor_boxes[:, 0] + 0.5 * height
+ctr_x = valid_anchor_boxes[:, 1] + 0.5 * width
+
+# 有效anchor对应目标框的中心点和宽高: base_ctr_x, base_ctr_y, base_width, base_height
+base_height = max_iou_bbox[:, 2] - max_iou_bbox[:, 0]
+base_width = max_iou_bbox[:, 3] - max_iou_bbox[:, 1]
+base_ctr_y = max_iou_bbox[:, 0] + 0.5 * base_height
+base_ctr_x = max_iou_bbox[:, 1] + 0.5 * base_width
+
 # # 有效anchor转为目标框的系数（dy，dx是平移系数；dh，dw是缩放系数）
-# eps = np.finfo(height.dtype).eps
-# height = np.maximum(height, eps)
-# width = np.maximum(width, eps)
-# dy = (base_ctr_y - ctr_y) / height
-# dx = (base_ctr_x - ctr_x) / width
-# dh = np.log(base_height / height)
-# dw = np.log(base_width / width)
-# anchor_locs = np.vstack((dy, dx, dh, dw)).transpose()
-# # print anchor_locs
-# print(anchor_locs.shape)
+eps = np.finfo(height.dtype).eps                 # .eps表示最小整数
+height = np.maximum(height, eps)
+width = np.maximum(width, eps)
+# faster-rcnn 论文公式  bbox回归用的L1-损失函数
+dy = (base_ctr_y - ctr_y) / height
+dx = (base_ctr_x - ctr_x) / width
+dh = np.log(base_height / height)
+dw = np.log(base_width / width)
+# print('dy.shape: ', dy.shape) # 8940
+anchor_locs = np.vstack((dy, dx, dh, dw)).transpose()
+# 保存的是 positive anchor与ground truth之间的平移量与尺度因子
+print(anchor_locs.shape) # (8940,4)
+
+
+#  anchor_labels ： 每个anchor框对应的label（-1：无效anchor，0：负例有效anchor，1：正例有效anchor）
+anchor_labels = np.empty((len(anchors),), dtype=label.dtype)
+anchor_labels.fill(-1)
+anchor_labels[valid_anchor_index] = label # 256-18=238个负例(0)  # 18个正例(1)
+
+#  anchor_locations： 每个有效anchor框转为目标框的系数
+# len(anchors)返回的是int类型,(len(anchors),)整体变为tuple,anchors.shape返回的是tuple，tuple的加法
+anchor_locations = np.empty((len(anchors),) + anchors.shape[1:], dtype=anchor_locs.dtype)
+anchor_locations.fill(0)
+anchor_locations[valid_anchor_index, :] = anchor_locs # anchor_locs # 保存的是 positive anchor与ground truth之间的平移量与尺度因子
+
 #
+# Region Proposal Network (RPN)
+import torch.nn as nn
+mid_channels = 512
+in_channels = 512 # depends on the output feature map. in vgg 16 it is equal to 512
+n_anchor = 9 # Number of anchors at each location
+conv1 = nn.Conv2d(in_channels, mid_channels, 3, 1, 1) # RPN网络，首先经过一个3*3卷积,stride=1,padding=1
+
+reg_layer = nn.Conv2d(mid_channels, n_anchor * 4, 1, 1, 0)
+cls_layer = nn.Conv2d(mid_channels, n_anchor * 2, 1, 1, 0) ## I will be going to use softmax here. you can equally use sigmoid if u replace 2 with 1.
+
+# conv sliding layer # 设置卷积层的权重， 正态分布 均值mean为0,方差std为0.01
+conv1.weight.data.normal_(0, 0.01)
+conv1.bias.data.zero_() # 设置卷积层的偏差
+
+# Regression layer
+reg_layer.weight.data.normal_(0, 0.01)
+reg_layer.bias.data.zero_()
+
+# classification layer
+cls_layer.weight.data.normal_(0, 0.01)
+cls_layer.bias.data.zero_()
+
+x = conv1(out_map)  # out_map is obtained in section 1
+pred_anchor_locs = reg_layer(x)  # 回归层，计算有效anchor转为目标框的四个系数
+pred_cls_scores = cls_layer(x)   # 分类层，判断该anchor是否可以捕获目标
+
+print(pred_cls_scores.shape, pred_anchor_locs.shape)  # ((1L, 18L, 50L, 50L), (1L, 36L, 50L, 50L))
 #
-# #  anchor_labels ： 每个anchor框对应的label（-1：无效anchor，0：负例有效anchor，1：正例有效anchor）
-# anchor_labels = np.empty((len(anchors),), dtype=label.dtype)
-# anchor_labels.fill(-1)
-# anchor_labels[valid_anchor_index] = label
-#
-# #  anchor_locations： 每个有效anchor框转为目标框的系数
-# anchor_locations = np.empty((len(anchors),) + anchors.shape[1:], dtype=anchor_locs.dtype)
-# anchor_locations.fill(0)
-# anchor_locations[valid_anchor_index, :] = anchor_locs
-#
-#
-# # Region Proposal Network (RPN)
-# import torch.nn as nn
-# mid_channels = 512
-# in_channels = 512 # depends on the output feature map. in vgg 16 it is equal to 512
-# n_anchor = 9 # Number of anchors at each location
-# conv1 = nn.Conv2d(in_channels, mid_channels, 3, 1, 1)
-# reg_layer = nn.Conv2d(mid_channels, n_anchor * 4, 1, 1, 0)
-# cls_layer = nn.Conv2d(mid_channels, n_anchor * 2, 1, 1, 0) ## I will be going to use softmax here. you can equally use sigmoid if u replace 2 with 1.
-#
-# # conv sliding layer
-# conv1.weight.data.normal_(0, 0.01)
-# conv1.bias.data.zero_()
-#
-# # Regression layer
-# reg_layer.weight.data.normal_(0, 0.01)
-# reg_layer.bias.data.zero_()
-#
-# # classification layer
-# cls_layer.weight.data.normal_(0, 0.01)
-# cls_layer.bias.data.zero_()
-#
-# x = conv1(out_map)  # out_map is obtained in section 1
-# pred_anchor_locs = reg_layer(x)  # 回归层，计算有效anchor转为目标框的四个系数
-# pred_cls_scores = cls_layer(x)   # 分类层，判断该anchor是否可以捕获目标
-#
-# print(pred_cls_scores.shape, pred_anchor_locs.shape)  # ((1L, 18L, 50L, 50L), (1L, 36L, 50L, 50L))
-#
-# pred_anchor_locs = pred_anchor_locs.permute(0, 2, 3, 1).contiguous().view(1, -1, 4)
-# print(pred_anchor_locs.shape)
-# #Out: torch.Size([1, 22500, 4])
-#
-# pred_cls_scores = pred_cls_scores.permute(0, 2, 3, 1).contiguous()
-# print(pred_cls_scores.shape)
-# #Out torch.Size([1, 50, 50, 18])
-#
-# objectness_score = pred_cls_scores.view(1, 50, 50, 9, 2)[:, :, :, :, 1].contiguous().view(1, -1)
-# print(objectness_score.shape)
-# #Out torch.Size([1, 22500])
-#
-# pred_cls_scores = pred_cls_scores.view(1, -1, 2)
-# print(pred_cls_scores.shape)
-# # Out torch.size([1, 22500, 2])
+# torch.permute() 维度交换
+# 当调用contiguous()时，会强制拷贝一份tensor，让它的布局和从头创建的一模一样，但是两个tensor完全没有联系
+pred_anchor_locs = pred_anchor_locs.permute(0, 2, 3, 1).contiguous().view(1, -1, 4)
+print(pred_anchor_locs.shape)
+#Out: torch.Size([1, 22500, 4])
+
+pred_cls_scores = pred_cls_scores.permute(0, 2, 3, 1).contiguous()
+print(pred_cls_scores.shape)
+#Out torch.Size([1, 50, 50, 18])
+
+objectness_score = pred_cls_scores.view(1, 50, 50, 9, 2)[:, :, :, :, 1].contiguous().view(1, -1)
+print(objectness_score.shape)
+#Out torch.Size([1, 22500])
+
+pred_cls_scores = pred_cls_scores.view(1, -1, 2)
+print(pred_cls_scores.shape)
+# Out torch.size([1, 22500, 2])
 #
 #
 # # Generating proposals to feed Fast R-CNN network
