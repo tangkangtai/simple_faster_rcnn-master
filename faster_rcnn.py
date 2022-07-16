@@ -49,6 +49,7 @@ print(out_channels) # 512
 faster_rcnn_fe_extractor = torch.nn.Sequential(*req_features)
 # gpu运行
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 faster_rcnn_fe_extractor.to(device)
 img_var = img_var.to(device)
 
@@ -274,8 +275,8 @@ print(np.sum(label == 0))  # 256-18=238个负例
 # 现在让我们用具有最大iou的ground truth对象为每个anchor box分配位置。
 # 注意，我们将为所有有效的anchor box分配anchor locs，而不考虑其标签，稍后在计算损失时，我们可以使用简单的过滤器删除它们。
 max_iou_bbox = bbox[argmax_ious]  # 有效anchor框对应的目标框坐标  (8940, 4)
-print(max_iou_bbox)
-print(max_iou_bbox.shape)  # (8940, 4)，共有8940个有效anchor框，每个anchor有坐标值（y1, x1, y2, x2）
+# print(max_iou_bbox) # 其中保存着 有效的anchor 与 最大iou值的gt-bbox 的坐标,(即这个anchor与哪个gt-bbox的iou值最大，则保存的该gt-bbox的坐标)
+print(max_iou_bbox.shape)  # (8940, 4)，共有8940个有效anchor框，每个anchor坐标值（y1, x1, y2, x2）
 
 # 有效anchor的中心点和宽高：ctr_x, ctr_y, width, height
 height = valid_anchor_boxes[:, 2] - valid_anchor_boxes[:, 0]
@@ -289,7 +290,7 @@ base_ctr_y = max_iou_bbox[:, 0] + 0.5 * base_height
 base_ctr_x = max_iou_bbox[:, 1] + 0.5 * base_width
 
 # 有效anchor转为目标框的系数（dy，dx是平移系数；dh，dw是缩放系数）
-eps = np.finfo(height.dtype).eps                 # .eps表示最小整数
+eps = np.finfo(height.dtype).eps     # .eps表示最小整数 # finfo函数是根据括号中的类型来获得信息，获得符合这个类型的数型
 height = np.maximum(height, eps)
 width = np.maximum(width, eps)
 # faster-rcnn 论文公式  bbox回归用的L1-损失函数
@@ -324,6 +325,10 @@ conv1 = nn.Conv2d(in_channels, mid_channels, 3, 1, 1) # RPN网络，首先经过
 
 reg_layer = nn.Conv2d(mid_channels, n_anchor * 4, 1, 1, 0)
 cls_layer = nn.Conv2d(mid_channels, n_anchor * 2, 1, 1, 0) ## I will be going to use softmax here. you can equally use sigmoid if u replace 2 with 1.
+#
+conv1.to(device)
+reg_layer.to(device)
+cls_layer.to(device)
 
 # conv sliding layer # 设置卷积层的权重， 正态分布 均值mean为0,方差std为0.01
 conv1.weight.data.normal_(0, 0.01)
@@ -337,50 +342,62 @@ reg_layer.bias.data.zero_()
 cls_layer.weight.data.normal_(0, 0.01)
 cls_layer.bias.data.zero_()
 
+
 x = conv1(out_map)  # out_map is obtained in section 1
+
 pred_anchor_locs = reg_layer(x)  # 回归层，计算有效anchor转为目标框的四个系数
 pred_cls_scores = cls_layer(x)   # 分类层，判断该anchor是否可以捕获目标
 
 print(pred_cls_scores.shape, pred_anchor_locs.shape)  # ((1L, 18L, 50L, 50L), (1L, 36L, 50L, 50L))
 #
-# pred_cls_scores = pred_cls_scores.permute(0, 2, 3, 1).contiguous()
-# print(pred_cls_scores.shape)
-# #Out torch.Size([1, 50, 50, 18])
+# torch.permute() 维度交换
+# 当调用contiguous()时，会强制拷贝一份tensor，让它的布局和从头创建的一模一样，但是两个tensor完全没有联系
+pred_anchor_locs = pred_anchor_locs.permute(0, 2, 3, 1).contiguous().view(1, -1, 4)
+print(pred_anchor_locs.shape)
+#Out: torch.Size([1, 22500, 4])
+
+pred_cls_scores = pred_cls_scores.permute(0, 2, 3, 1).contiguous()
+print(pred_cls_scores.shape)
+#Out torch.Size([1, 50, 50, 18])
+
+objectness_score = pred_cls_scores.view(1, 50, 50, 9, 2)[:, :, :, :, 1].contiguous().view(1, -1)
+print(objectness_score.shape)
+#Out torch.Size([1, 22500])
+
+pred_cls_scores = pred_cls_scores.view(1, -1, 2)
+print(pred_cls_scores.shapecc)
+# Out torch.size([1, 22500, 2])
+
+
+# Generating proposals to feed Fast R-CNN network
+n_train_pre_nms = 12000
+n_train_post_nms = 2000
+
+n_test_pre_nms = 6000
+n_test_post_nms = 300
+min_size = 16
 #
-# objectness_score = pred_cls_scores.view(1, 50, 50, 9, 2)[:, :, :, :, 1].contiguous().view(1, -1)
-# print(objectness_score.shape)
-# #Out torch.Size([1, 22500])
+# 转换anchor格式从 y1, x1, y2, x2 到 ctr_x, ctr_y, h, w ：
+anc_height = anchors[:, 2] - anchors[:, 0]
+anc_width = anchors[:, 3] - anchors[:, 1]
+anc_ctr_y = anchors[:, 0] + 0.5 * anc_height
+anc_ctr_x = anchors[:, 1] + 0.5 * anc_width
+
 #
-# pred_cls_scores = pred_cls_scores.view(1, -1, 2)
-# print(pred_cls_scores.shape)
-# # Out torch.size([1, 22500, 2])
-#
-#
-# # Generating proposals to feed Fast R-CNN network
-# n_train_pre_nms = 12000
-# n_train_post_nms = 2000
-# n_test_pre_nms = 6000
-# n_test_post_nms = 300
-# min_size = 16
-#
-# # 转换anchor格式从 y1, x1, y2, x2 到 ctr_x, ctr_y, h, w ：
-# anc_height = anchors[:, 2] - anchors[:, 0]
-# anc_width = anchors[:, 3] - anchors[:, 1]
-# anc_ctr_y = anchors[:, 0] + 0.5 * anc_height
-# anc_ctr_x = anchors[:, 1] + 0.5 * anc_width
-#
-#
-# # 根据预测的四个系数，将anchor框通过平移和缩放转化为预测的目标框
-# pred_anchor_locs_numpy = pred_anchor_locs[0].data.numpy()
-# objectness_score_numpy = objectness_score[0].data.numpy()
-# dy = pred_anchor_locs_numpy[:, 0::4]
-# dx = pred_anchor_locs_numpy[:, 1::4]
-# dh = pred_anchor_locs_numpy[:, 2::4]
-# dw = pred_anchor_locs_numpy[:, 3::4]
-# ctr_y = dy * anc_height[:, np.newaxis] + anc_ctr_y[:, np.newaxis]
-# ctr_x = dx * anc_width[:, np.newaxis] + anc_ctr_x[:, np.newaxis]
-# h = np.exp(dh) * anc_height[:, np.newaxis]
-# w = np.exp(dw) * anc_width[:, np.newaxis]
+# 根据预测的四个系数，将anchor框通过平移和缩放转化为预测的目标框
+# pred_anchor_locs 保存着 主干网络特征output输出后 经过3*3卷积后的特征，再经过 1*1卷积层 输出的 预测anchors的 bbox偏移量 (1L, 36L, 50L, 50L)  , (dy,dx,dh,dw)
+# objectness_score 保存着 主干网络特征output输出后 经过3*3卷积后的特征，再经过 1*1卷积层 输出的 预测anchors的 positive 和 negative分类(1L, 18L, 50L, 50L), (dy,dx,dh,dw)
+pred_anchor_locs_numpy = pred_anchor_locs[0].data.numpy()
+objectness_score_numpy = objectness_score[0].data.numpy()
+dy = pred_anchor_locs_numpy[:, 0::4]
+dx = pred_anchor_locs_numpy[:, 1::4]
+dh = pred_anchor_locs_numpy[:, 2::4]
+dw = pred_anchor_locs_numpy[:, 3::4]
+
+ctr_y = dy * anc_height[:, np.newaxis] + anc_ctr_y[:, np.newaxis]
+ctr_x = dx * anc_width[:, np.newaxis] + anc_ctr_x[:, np.newaxis]
+h = np.exp(dh) * anc_height[:, np.newaxis]
+w = np.exp(dw) * anc_width[:, np.newaxis]
 #
 # #  将预测的目标框转换为[y1, x1, y2, x2]格式
 # roi = np.zeros(pred_anchor_locs_numpy.shape, dtype=pred_anchor_locs_numpy.dtype)
@@ -390,7 +407,7 @@ print(pred_cls_scores.shape, pred_anchor_locs.shape)  # ((1L, 18L, 50L, 50L), (1
 # roi[:, 3::4] = ctr_x + 0.5 * w
 #
 #
-# # 剪辑预测框到图像上
+# # 剪辑 预测框到图像上
 # img_size = (800, 800) #Image size
 # roi[:, slice(0, 4, 2)] = np.clip(roi[:, slice(0, 4, 2)], 0, img_size[0])
 # roi[:, slice(1, 4, 2)] = np.clip(roi[:, slice(1, 4, 2)], 0, img_size[1])
