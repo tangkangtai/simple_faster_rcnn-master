@@ -2,6 +2,8 @@
 #
 import torch
 import torchvision
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 from PIL import Image, ImageDraw
 import numpy as np
 
@@ -11,57 +13,74 @@ print(img_tensor.shape)
 
 img_var = torch.autograd.Variable(img_tensor)
 
-model = torchvision.models.vgg16(pretrained=False)
-fe = list(model.features)
+model = torchvision.models.vgg16(pretrained=False) # 不需要预训练的模型 pretrained=True则需要预训练模型
+fe = list(model.features) #  列出所有的卷积层细节~
 # print(fe)  # length is 15
+print('len(fe) = ', len(fe)) # len(fe)=31, 13个conv,13个relu,4个pooling
+"""
+conv+relu+conv+relu+maxpool2d + conv+relu+conv+relu+maxpool2d + conv+relu+conv+relu+conv+relu+maxpool2d 
+                                                            + conv+relu+conv+relu+conv+relu+maxpool2d
+                                                            +conv+relu+conv+relu+conv+relu+maxpool2d
+"""
+# for i in fe:
+#     print(i)
 
 req_features = []
-k = img_var.clone()
+k = img_var.clone() # 向量或是矩阵的赋值是指向同一内存的,保存旧的tensor,可以用 clone() 进行深拷贝//////detach()方法则与原始tensor共享内存
+
 for i in fe:
-   # print(i)
+   print(i)
    k = i(k)
-   # print(k.data.shape)
+   print(k.data.shape)
+
    if k.size()[2] < 800//16:
        break
+
    req_features.append(i)
    out_channels = k.size()[1]
-# print(len(req_features)) #30
-# print(out_channels) # 512
+
+print(len(req_features)) #30
+print(out_channels) # 512
 
 # for f in req_features:
 #     print(f)
-# #
+#
 #
 faster_rcnn_fe_extractor = torch.nn.Sequential(*req_features)
+# gpu运行
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+faster_rcnn_fe_extractor.to(device)
+img_var = img_var.to(device)
+
 out_map = faster_rcnn_fe_extractor(img_var)
 print(out_map.size())
-# # #Out: torch.Size([1, 512, 50, 50])
-#
+#Out: torch.Size([1, 512, 50, 50])
+
 ratios = [0.5, 1, 2]
 anchor_scales = [8, 16, 32]
 sub_sample = 16
-#
-# # 一个特征点对应原图片中的16*16个像素点区域
+
+# 一个特征点对应原图片中的16*16个像素点区域
 fe_size = (800//16)
 # ctr_x， ctr_y: 每个特征点对应原图片区域的右下方坐标
 ctr_x = np.arange(16, (fe_size+1) * 16, 16)
 ctr_y = np.arange(16, (fe_size+1) * 16, 16)
 print(len(ctr_x))  # 共50*50个特征点，将原图片分割成50*50=2500个区域
-#
-#
+
+
 index = 0
 # ctr: 每个特征点对应原图片区域的中心点
 ctr = dict()
 for x in range(len(ctr_x)):
    for y in range(len(ctr_y)):
-       ctr[index] = [-1, -1] # 先初始化，然后下面两行赋值
+       ctr[index] = [-1, -1]
        ctr[index][1] = ctr_x[x] - 8
        ctr[index][0] = ctr_y[y] - 8
        index +=1
-# print('ctr: ', ctr)
-print('len(ctr): ', len(ctr))  # 将原图片分割成50*50=2500个区域的中心点
-#
-#
+# print ctr
+print(len(ctr))  # 将原图片分割成50*50=2500个区域的中心点
+
+
 # 初始化：每个区域有9个anchors候选框，每个候选框的坐标(y1, x1, y2, x2)
 anchors = np.zeros(((fe_size * fe_size * 9), 4))
 # (22500, 4)
@@ -175,29 +194,70 @@ for index in gt_argmax_ious:
                     (valid_anchor_boxes[index, 3], valid_anchor_boxes[index, 2])], outline=(0, 0, 205)) #设置为蓝色框
 img.show()
 #
-# 正负样本
+
+# 获取有效anchor（即边框都在图片内的anchor）的坐标
+valid_anchor_boxes = anchors[valid_anchor_index]
+print(valid_anchor_boxes.shape)  # (8940, 4)
+
+
+# 计算有效anchor框"valid_anchor_boxes"与目标框"bbox"的IOU
+ious = np.empty((len(valid_anchor_boxes), 2), dtype=np.float32)
+ious.fill(0)
+print(bbox)
+for num1, i in enumerate(valid_anchor_boxes):
+   ya1, xa1, ya2, xa2 = i
+   anchor_area = (ya2 - ya1) * (xa2 - xa1)  # anchor框面积
+   for num2, j in enumerate(bbox):
+       yb1, xb1, yb2, xb2 = j
+       box_area = (yb2 - yb1) * (xb2 - xb1)  # 目标框面积
+       inter_x1 = max([xb1, xa1])
+       inter_y1 = max([yb1, ya1])
+       inter_x2 = min([xb2, xa2])
+       inter_y2 = min([yb2, ya2])
+       if (inter_x1 < inter_x2) and (inter_y1 < inter_y2):
+           iter_area = (inter_y2 - inter_y1) * (inter_x2 - inter_x1)  # anchor框和目标框的相交面积
+           iou = iter_area / (anchor_area + box_area - iter_area)  # IOU计算
+       else:
+           iou = 0.
+
+       ious[num1, num2] = iou
+print(ious.shape)  # (8940, 2)  表示每个anchor框与所有目标框的IOU，这里所有的目标框共2个。
+gt_argmax_ious = ious.argmax(axis=0)  # 找出每个目标框最大IOU的anchor框index，共2个
+print(gt_argmax_ious)  # 共2个，与图片内目标框数量一致
+gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # 获取每个目标框最大IOU的值，与gt_argmax_ious对应
+print(gt_max_ious)  # 共2个，与图片内目标框数量一致
+argmax_ious = ious.argmax(axis=1)  # 找出每个anchor框最大IOU的目标框index，共8940个
+print(argmax_ious.shape)  # (8940,) 每个anchor框都会对应一个最大IOU的目标框
+max_ious = ious[np.arange(len(valid_anchor_index)), argmax_ious]  # 获取每个anchor框的最大IOU值， 与argmax_ious对应
+print(max_ious.shape)  # (8940,),每个anchor框内都会有一个最大值
+
+# 疑问： ious == gt_max_ious， 有区分目标
+gt_argmax_ious = np.where(ious == gt_max_ious)[0]  # 根据上面获取的目标最大IOU值，获取等于该值的index
+print(gt_argmax_ious.shape)  # (18,) 共计18个
+# for index in gt_argmax_ious:
+#     draw.rectangle([(valid_anchor_boxes[index, 1], valid_anchor_boxes[index, 0]),
+#                     (valid_anchor_boxes[index, 3], valid_anchor_boxes[index, 2])], outline=(255, 0, 0))
+# img.show()
+
+
 pos_iou_threshold = 0.7
 neg_iou_threshold = 0.3
-
 label = np.empty((len(valid_anchor_index), ), dtype=np.int32)
 label.fill(-1)
 print(label.shape)  # (8940,)
-
 label[max_ious < neg_iou_threshold] = 0  # anchor框内最大IOU值小于neg_iou_threshold，设为0
-label[gt_argmax_ious] = 1  # anchor框有全局最大IOU值，设为1 # gt_argmax_ious.shape 18个
+label[gt_argmax_ious] = 1  # anchor框有全局最大IOU值，设为1
 label[max_ious >= pos_iou_threshold] = 1  # anchor框内最大IOU值大于等于pos_iou_threshold，设为1
-print('iou的值大于0的个数: ', np.where(label>0)[0].shape) # 18个
+
 
 
 pos_ratio = 0.5
 n_sample = 256
-n_pos = pos_ratio * n_sample  # 正例样本数 256*0.5=128个
+n_pos = pos_ratio * n_sample  # 正例样本数
 
 # 随机获取n_pos个正例，
 pos_index = np.where(label == 1)[0]
-print('len(pos_index): ', len(pos_index)) # 18个正例
-
-if len(pos_index) > n_pos: # 如果正例样本数少于正例数，则随机选择 整理样本个数
+if len(pos_index) > n_pos:
    disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos), replace=False)
    label[disable_index] = -1
 
@@ -207,16 +267,14 @@ neg_index = np.where(label == 0)[0]
 if len(neg_index) > n_neg:
    disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace = False)
    label[disable_index] = -1
-
 print(np.sum(label == 1))  # 18个正例
 print(np.sum(label == 0))  # 256-18=238个负例
 
 
 # 现在让我们用具有最大iou的ground truth对象为每个anchor box分配位置。
 # 注意，我们将为所有有效的anchor box分配anchor locs，而不考虑其标签，稍后在计算损失时，我们可以使用简单的过滤器删除它们。
-# argmax_ious:(8940,) ious中每行(表示每个anchor)对应的最大iou的gt-bbox
 max_iou_bbox = bbox[argmax_ious]  # 有效anchor框对应的目标框坐标  (8940, 4)
-# print(max_iou_bbox) # 保存的所有的anchor对应的最大iou的gt-bbox的gt-bbox坐标
+print(max_iou_bbox)
 print(max_iou_bbox.shape)  # (8940, 4)，共有8940个有效anchor框，每个anchor有坐标值（y1, x1, y2, x2）
 
 # 有效anchor的中心点和宽高：ctr_x, ctr_y, width, height
@@ -224,14 +282,13 @@ height = valid_anchor_boxes[:, 2] - valid_anchor_boxes[:, 0]
 width = valid_anchor_boxes[:, 3] - valid_anchor_boxes[:, 1]
 ctr_y = valid_anchor_boxes[:, 0] + 0.5 * height
 ctr_x = valid_anchor_boxes[:, 1] + 0.5 * width
-
 # 有效anchor对应目标框的中心点和宽高: base_ctr_x, base_ctr_y, base_width, base_height
 base_height = max_iou_bbox[:, 2] - max_iou_bbox[:, 0]
 base_width = max_iou_bbox[:, 3] - max_iou_bbox[:, 1]
 base_ctr_y = max_iou_bbox[:, 0] + 0.5 * base_height
 base_ctr_x = max_iou_bbox[:, 1] + 0.5 * base_width
 
-# # 有效anchor转为目标框的系数（dy，dx是平移系数；dh，dw是缩放系数）
+# 有效anchor转为目标框的系数（dy，dx是平移系数；dh，dw是缩放系数）
 eps = np.finfo(height.dtype).eps                 # .eps表示最小整数
 height = np.maximum(height, eps)
 width = np.maximum(width, eps)
@@ -286,23 +343,17 @@ pred_cls_scores = cls_layer(x)   # 分类层，判断该anchor是否可以捕获
 
 print(pred_cls_scores.shape, pred_anchor_locs.shape)  # ((1L, 18L, 50L, 50L), (1L, 36L, 50L, 50L))
 #
-# torch.permute() 维度交换
-# 当调用contiguous()时，会强制拷贝一份tensor，让它的布局和从头创建的一模一样，但是两个tensor完全没有联系
-pred_anchor_locs = pred_anchor_locs.permute(0, 2, 3, 1).contiguous().view(1, -1, 4)
-print(pred_anchor_locs.shape)
-#Out: torch.Size([1, 22500, 4])
-
-pred_cls_scores = pred_cls_scores.permute(0, 2, 3, 1).contiguous()
-print(pred_cls_scores.shape)
-#Out torch.Size([1, 50, 50, 18])
-
-objectness_score = pred_cls_scores.view(1, 50, 50, 9, 2)[:, :, :, :, 1].contiguous().view(1, -1)
-print(objectness_score.shape)
-#Out torch.Size([1, 22500])
-
-pred_cls_scores = pred_cls_scores.view(1, -1, 2)
-print(pred_cls_scores.shape)
-# Out torch.size([1, 22500, 2])
+# pred_cls_scores = pred_cls_scores.permute(0, 2, 3, 1).contiguous()
+# print(pred_cls_scores.shape)
+# #Out torch.Size([1, 50, 50, 18])
+#
+# objectness_score = pred_cls_scores.view(1, 50, 50, 9, 2)[:, :, :, :, 1].contiguous().view(1, -1)
+# print(objectness_score.shape)
+# #Out torch.Size([1, 22500])
+#
+# pred_cls_scores = pred_cls_scores.view(1, -1, 2)
+# print(pred_cls_scores.shape)
+# # Out torch.size([1, 22500, 2])
 #
 #
 # # Generating proposals to feed Fast R-CNN network

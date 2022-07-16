@@ -216,18 +216,121 @@ def test10():
     print('argmax_axis_1 = ', argmax_axis_1)
 
 def test11():
-    x = np.arange(2)
-    print(x)
+    # x = np.arange(2)
+    # print(type((3,))) # 元组
+    # x = (3,) + (4,)
+    # print(x) # (3, 4)
+    anchors1 = np.arange(24).reshape(-1,2,3)
+    anchors2 = np.arange(24).reshape(-1,4)
+    print(anchors1.shape[1:]) # (2,3)
+    print(type(anchors2.shape[1:])) # (4,,)
 
+def test12():
+    """
+    模拟 100张 4*4的张量，resize测试
+    """
+    tensor1 = torch.arange(18*4*4).reshape(1,18,4,4) # 10个4*4
+    # print(tensor1.shape)
+    # print(tensor1)
+    # tensor2 = tensor1.permute(0, 2, 3, 1).contiguous() # 4个4*10
+    tensor3 = tensor1.permute(0, 2, 3, 1).contiguous().view(1, 4, 4, 9, 2)
+    tensor4 = tensor1.permute(0, 2, 3, 1).contiguous().view(1, 4, 4, 9, 2)[:, :, :, :, 1]
+    print(tensor3.shape)
+    print(tensor3)
+    print(tensor4)
+
+def test13():
+    """
+    列表和数组的区别
+    :return:
+    """
+    x = np.array([6, 8])
+    p = [0, 1, 1, 0, 1, 0, 1, 1]
+    y = x[p]
+    print(y)
+
+def torch_narrow_test():
+    data = torch.arange(12).reshape(-1,6)
+    # torch.from_numpy() # 用来将数组array转换为张量
+    # data_to_numpy = data.numpy() # 张量转成数组
+    # data_to_list = data.tolist() # 张量转成列表 && 或者 list(data)
+    # data.item() # 张量转成数值
+    print('data: ', data)
+    narrow1 = data.narrow(1, 3, 3)
+    print("narrow_data: ", narrow1)
+
+def slice_test_roi():
+    reshape = torch.arange(5 * 20 * 20).reshape(-1, 20, 20) # tensor (5, 4, 4)
+    print('reshape: ', reshape)
+    im = reshape[..., 3:8, 4:6]
+    print('im: ', im)
+    print('im.shape: ', im.shape)
+
+def max_pooling_test():
+    maxpooling = torch.nn.AdaptiveMaxPool2d((2,2))
+
+    input = torch.autograd.Variable(torch.randn(1, 20, 3, 4))
+    print('input: ', input)
+    print('maxpooling(input).shape', maxpooling(input).shape)
+    print('maxpooling(input)[0]', maxpooling(input)[0])
+    print('maxpooling(input)[0].data', maxpooling(input)[0].data)
+    # print('maxpooling(input)', maxpooling(input))
+
+def cat_test():
+    list1 = []
+    reshape = torch.arange(1 * 10 * 4 * 4).reshape(1, -1, 4, 4)
+    for i in range(5):
+        list1.append(reshape)
+
+    print('reshape.shape: ', reshape.shape)
+    print('len(append1): ', len(list1))
+
+    # print(list1)
+    list1 = torch.cat(list1, 0)
+    print('list1.shape: ', list1.shape)
+
+def test14():
+    n_sample = 10
+    reshape1 = torch.arange(10 * 5 * 4).reshape(10, 5, 4) # (10, 5, 4)
+    reshape2 = torch.empty(10, dtype=np.int)
+    print('reshape1: ', reshape1)
+    reshape2.fill_(0)
+    # print(reshape2)
+    padding = torch.arange(6)
+    reshape2[padding] = 3
+    print('reshape2: ', reshape2)
+    # # print(reshape)
+    # print(torch.arange(6))
+    # print(torch.arange(0, 6))
+    reshape1 = reshape1[torch.arange(0, n_sample).long(), reshape2]
+    print('reshape1.shape: ', reshape1.shape)
+    print('reshape1: ', reshape1)
+
+def test15():
+    t1 = torch.arange(3 * 4 * 5).reshape(3, 4, 5) # 3个 4 * 5 tensor
+    print(t1)
+    print(t1[0,1]) # 第0个, 里面的 第 1(下标) 个 tensor
+
+def test16():
+    t_expand = torch.arange(40).reshape(-1,4)
+    t1 = torch.arange(10)
+    print('t1.shape: ', t1.shape)
+    print('t1: ', t1)
+    t1_unsqueeze = t1.unsqueeze(1)
+    print('t1_squeeze.shape: ', t1_unsqueeze.shape)
+    print('t1_squeeze: ', t1_unsqueeze)
+    t1_unsqueeze_expand_as = t1_unsqueeze.expand_as(t_expand)
+    print('t1_unsqueeze_expand_as.shape: ', t1_unsqueeze_expand_as.shape)
+    print('t1_unsqueeze_expand_as: ', t1_unsqueeze_expand_as)
 
 if __name__ == '__main__':
-    #utils_get_pos_neg_sample_test()
-    #where_test()
-    #random_choice_test()
-    #random_choice_test1()
+    # utils_get_pos_neg_sample_test()
+    # where_test()
+    # random_choice_test()
+    # random_choice_test1()
     # anchor_test()
     # test3()
-    #test4()
+    # test4()
     # test_np_newaxis()
     # test6()
     # slice_test()
@@ -236,4 +339,13 @@ if __name__ == '__main__':
     # test8()
     # test9()
     # test10()
-    test11()
+    # test11()
+    # test12()
+    # test13()
+    # torch_narrow_test()
+    # slice_test_roi()
+    # max_pooling_test()
+    # cat_test()
+    # test14()
+    # test15()
+    test16()

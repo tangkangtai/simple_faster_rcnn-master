@@ -164,6 +164,7 @@ def get_pos_neg_sample(ious, valid_anchor_len, pos_iou_threshold=0.7,neg_iou_thr
 # anchors： (22500, 4)
 # pred_anchor_locs: RPN网络预测anchor的坐标系数: (1, 22500, 4)
 # objectness_score: Out torch.Size([1, 22500])
+
 def get_predict_bbox(anchors, pred_anchor_locs, objectness_score, n_train_pre_nms=12000, min_size=16):
     # 转换anchor格式从 y1, x1, y2, x2 到 ctr_x, ctr_y, h, w ：
     anc_height = anchors[:, 2] - anchors[:, 0]
@@ -182,6 +183,7 @@ def get_predict_bbox(anchors, pred_anchor_locs, objectness_score, n_train_pre_nm
     # np.newaxis的作用就是选取部分的数据增加一个维度
     ctr_y = dy * anc_height[:, np.newaxis] + anc_ctr_y[:, np.newaxis]
     ctr_x = dx * anc_width[:, np.newaxis] + anc_ctr_x[:, np.newaxis]
+
     h = np.exp(dh) * anc_height[:, np.newaxis]
     w = np.exp(dw) * anc_width[:, np.newaxis]
 
@@ -211,7 +213,7 @@ def get_predict_bbox(anchors, pred_anchor_locs, objectness_score, n_train_pre_nm
     keep = np.where((hs >= min_size) & (ws >= min_size))[0]
     roi = roi[keep, :]
     score = objectness_score_numpy[keep] # objectness_score_numpy = (22500)
-
+    # print('score.shape = ', score.shape) # (22500,)
     # 按分数从高到低排序所有的（proposal, score）对
     # ravel()方法将数组维度拉成一维数组
     # argsort() 从小到大排序，返回索引数组
@@ -224,13 +226,15 @@ def get_predict_bbox(anchors, pred_anchor_locs, objectness_score, n_train_pre_nm
 # torch.masked_select()
 
 
-# roi 中保存着预测的目标框的坐标(有效的，去除了高度宽度低于阈值的)
-# score (有效框的分数)
+# roi 中保存着预测的目标框的坐标(有效的，去除了高度宽度低于阈值的)(22500,4)
+# score (有效框的分数) # score (22500, )
 # 训练时order返回前12000个分数高的
 def nms(roi, score, order, nms_thresh=0.7, n_train_post_nms=2000):
     # nms（非极大抑制）计算： (去除和极大值anchor框IOU大于0.7的框——即去除相交的框，保留score大，且基本无相交的框)
     roi = roi[order, :]  # (12000, 4)
-    score = score[order]
+    score = score[order]  # 所有有效框anchor得分
+    # print('score.shape = ', score.shape)# (12000,)
+    # print('score = ', score[np.where(score != 0)])  自己测试
     y1 = roi[:, 0]
     x1 = roi[:, 1]
     y2 = roi[:, 2]
@@ -250,11 +254,11 @@ def nms(roi, score, order, nms_thresh=0.7, n_train_post_nms=2000):
         # 图片i分别与其余图片相交的矩形的坐标
         xx1 = np.maximum(x1[i], x1[order[1:]])
         yy1 = np.maximum(y1[i], y1[order[1:]])
-
+        # (y1, x1, y2, x2)
         xx2 = np.minimum(x2[i], x2[order[1:]])
         yy2 = np.minimum(y2[i], y2[order[1:]])
 
-        # 计算出各个相交矩形的面积
+        # 计算出各个相交矩形的面积,不重叠时为0
         w = np.maximum(0.0, xx2 - xx1 + 1)
         h = np.maximum(0.0, yy2 - yy1 + 1)
         inter = w * h
@@ -263,16 +267,23 @@ def nms(roi, score, order, nms_thresh=0.7, n_train_post_nms=2000):
 
         # print ovr
         # 只保留比例小于阈值的图片，然后继续处理
+        # nms_thresh=0.7
         inds = np.where(ovr <= nms_thresh)[0]
         # print inds
+        # 因为ovr数组的长度比order数组少一个,所以这里要将所有下标后移一位
         order = order[inds + 1]  # 这里加1是因为在计算IOU时，把序列的第一个忽略了（如上面的order[1:]）
+        # print('order.size = ', order.size)
 
+    #  n_train_post_nms=2000
     keep = keep[:n_train_post_nms]  # while training/testing , use accordingly
     roi = roi[keep]  # the final region proposals（region proposals表示预测目标框）
     # print roi.shape  # (1758, 4)
     return roi
 
-
+# roi 保存着经过nms过后的预测anchor # (1758, 4) // (y1, x1, y2, x2)
+# bbox = np.asarray([[20, 30, 400, 500],[300, 400, 500, 600]], dtype=np.float32) # [y1, x1, y2, x2] format
+# # 假设 图片中两个目标框分别对应的标签
+# labels = np.asarray([6, 8], dtype=np.int8)  # 0 represents background
 def get_propose_target(roi, bbox, labels, n_sample=128, pos_ratio=0.25,
                        pos_iou_thresh=0.5, neg_iou_thresh_hi=0.5, neg_iou_thresh_lo = 0.0):
     # Proposal targets
@@ -281,19 +292,21 @@ def get_propose_target(roi, bbox, labels, n_sample=128, pos_ratio=0.25,
     # print(ious.shape)  # (1758, 2)
 
     # 找到与每个region proposal具有较高IoU的ground truth，并且找到最大的IoU
-    gt_assignment = ious.argmax(axis=1)
-    max_iou = ious.max(axis=1)
+    gt_assignment = ious.argmax(axis=1) # axis=1(行操作) 保存每个anchor对应bbox的最大iou的值的 下标
+    max_iou = ious.max(axis=1) # 保存每个anchor对应bbox的最大iou的 值
     # print(gt_assignment)  # [0 0 1 ... 0 0 0]
     # print(max_iou)  # [0.17802152 0.17926688 0.04676317 ... 0.         0.         0.        ]
 
+    # print('type(labels):', type(labels)) # <class 'numpy.ndarray'>
+    # print('type(gt_assignment): ', gt_assignment)
     # 为每个proposal分配标签：
-    gt_roi_label = labels[gt_assignment]
+    gt_roi_label = labels[gt_assignment] # 保存 每个对应bbox的最大iou的候选anchor分配的 标签
     # print(gt_roi_label)  # [6 6 8 ... 6 6 6]
 
     # 希望只保留n_sample*pos_ratio（128*0.25=32）个前景样本，因此如果只得到少于32个正样本，保持原状。
     # 如果得到多余32个前景目标，从中采样32个样本
-    pos_roi_per_image = n_sample*pos_ratio
-    pos_index = np.where(max_iou >= pos_iou_thresh)[0]
+    pos_roi_per_image = n_sample * pos_ratio
+    pos_index = np.where(max_iou >= pos_iou_thresh)[0] # pos_iou_thresh=0.5
     pos_roi_per_this_image = int(min(pos_roi_per_image, pos_index.size))
     if pos_index.size > 0:
         pos_index = np.random.choice(pos_index, size=pos_roi_per_this_image, replace=False)
@@ -309,10 +322,13 @@ def get_propose_target(roi, bbox, labels, n_sample=128, pos_ratio=0.25,
     # print(neg_roi_per_this_image)
     # print(neg_index)  # 109
 
-    keep_index = np.append(pos_index, neg_index)
-    gt_roi_labels = gt_roi_label[keep_index]
-    gt_roi_labels[pos_roi_per_this_image:] = 0  # negative labels --> 0
-    sample_roi = roi[keep_index]  # 预测框
+    # np.append(arr, values,axis=None) 为原始array添加一些values参数
+    keep_index = np.append(pos_index, neg_index) # 保存所有预测的(正负样本)anchor的下标
+
+    gt_roi_labels = gt_roi_label[keep_index] # 保存着 重新排列所有正负样本的标签labels
+    gt_roi_labels[pos_roi_per_this_image:] = 0  # negative labels --> 0 # 负样本标签全设为0
+
+    sample_roi = roi[keep_index]  # 预测框  # 保存着bbox与所有预测框anchor的 roi [包括正/负样本]
     # print(sample_roi.shape)  # (128, 4)
     return sample_roi, keep_index, gt_assignment, gt_roi_labels
 
