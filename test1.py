@@ -98,14 +98,6 @@ def test4():
     print(dh)
     print(dw)
 
-def test5():
-    pred_anchor_locs_numpy = torch.arange(24).reshape(-1, 4)
-    print(pred_anchor_locs_numpy)
-
-    dy = pred_anchor_locs_numpy[:, 0::4]
-    dx = pred_anchor_locs_numpy[:, 1::4]
-    dh = pred_anchor_locs_numpy[:, 2::4]
-    dw = pred_anchor_locs_numpy[:, 3::4]
 
 def test_np_newaxis():
 
@@ -134,7 +126,11 @@ def slice_test():
     # print(clip)\
     # s = slice(0, 5, 2)
     # print(reshape[s])
-
+    '''
+    # slice(start, stop, step)
+    # np.clip(a,a_min,a_max) 将将数组中的元素限制在a_min, a_max之间，
+    # 大于a_max的就使得它等于 a_max，小于a_min,的就使得它等于a_min.
+    '''
     slice_1 = reshape[:,slice(0, 4, 2)]
     slice_2 = reshape[:,slice(1, 4, 2)]
     print(slice_1)
@@ -323,6 +319,72 @@ def test16():
     print('t1_unsqueeze_expand_as.shape: ', t1_unsqueeze_expand_as.shape)
     print('t1_unsqueeze_expand_as: ', t1_unsqueeze_expand_as)
 
+def test17():
+    resize = torch.arange(20).reshape(1, 4, 5)
+    print('resize.shape: ', resize.shape)
+    print(resize[0])
+    print(resize[0].data)
+
+def test5():
+    pred_anchor_locs_numpy = torch.arange(24).reshape(-1, 4)
+    print(pred_anchor_locs_numpy)
+
+    anchors = torch.arange(24).reshape(-1,4)
+    anc_height = anchors[:, 2] - anchors[:, 0]
+    print('anc_height.shape: ', anc_height.shape)
+    print('anc_height: ',anc_height)
+    print('=========================================')
+    print('anc_height[:, np.newaxis]:')
+    print(anc_height[:,np.newaxis])
+    print(anc_height[:,np.newaxis].shape)
+    dy = pred_anchor_locs_numpy[:, 0::4]
+    # dx = pred_anchor_locs_numpy[:, 1::4]
+    # dh = pred_anchor_locs_numpy[:, 2::4]
+    # dw = pred_anchor_locs_numpy[:, 3::4]
+    print('dy.shape: ',dy.shape)
+    print('dy: ',dy)
+    ctr_y = dy * anc_height[:, np.newaxis]
+    print('ctr_y: ', ctr_y)
+
+def tensor_mutiple_test():
+    a = torch.tensor([[1, 2], [2, 3], [3, 4]])
+    b = torch.tensor([[1, 2], [2, 3], [3, 4]])
+    print('a: ')
+    print(a)
+    print('b: ')
+    print(b)
+    print('a * b = ')
+    print(a * b)
+
+    # 输出：
+    # tensor([[1, 4],
+    #         [4, 9],
+    #         [9, 16]])
+def new_axis_test():
+    # anchors = torch.arange(24).reshape(-1, 4)
+    # anc_height = anchors[:, 2] - anchors[:, 0]
+    # print('anc_height.shape: ', anc_height.shape)
+    # print('anc_height: ',anc_height)
+    # print('=========================================')
+    # print('anc_height[:, np.newaxis]:')
+    # print(anc_height[:,np.newaxis])
+    # print(anc_height[:,np.newaxis].shape)
+##########################################################
+    anchors = torch.arange(24).reshape(4, 6)
+    print(anchors.shape)
+    print(anchors)
+    print('==================================')
+    print(anchors[:, np.newaxis].shape)
+    print(anchors[:, np.newaxis])
+    print('==================================')
+    print(anchors[:, :, np.newaxis].shape)
+    print(anchors[:, :, np.newaxis])
+
+def test_list_index():
+    k = [1,2,3,4,5,6,7,8,9,10]
+    k = k[:100]
+    print(k)
+
 if __name__ == '__main__':
     # utils_get_pos_neg_sample_test()
     # where_test()
@@ -348,4 +410,9 @@ if __name__ == '__main__':
     # cat_test()
     # test14()
     # test15()
-    test16()
+    # test16()
+    # test17()
+    # test5()
+    # tensor_mutiple_test()
+    # new_axis_test()
+    test_list_index()

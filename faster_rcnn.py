@@ -16,7 +16,7 @@ img_var = torch.autograd.Variable(img_tensor)
 model = torchvision.models.vgg16(pretrained=False) # 不需要预训练的模型 pretrained=True则需要预训练模型
 fe = list(model.features) #  列出所有的卷积层细节~
 # print(fe)  # length is 15
-print('len(fe) = ', len(fe)) # len(fe)=31, 13个conv,13个relu,4个pooling
+# print('len(fe) = ', len(fe)) # len(fe)=31, 13个conv,13个relu,4个pooling
 """
 conv+relu+conv+relu+maxpool2d + conv+relu+conv+relu+maxpool2d + conv+relu+conv+relu+conv+relu+maxpool2d 
                                                             + conv+relu+conv+relu+conv+relu+maxpool2d
@@ -113,19 +113,19 @@ img = Image.fromarray(np.uint8(img_npy)) #array转换成image
 # img.show() # 显示图片
 draw = ImageDraw.Draw(img)
 
-for index in range(15000, 15009):
-# for index in range(len(anchors)):
-    # PIL.ImageDraw.Draw.rectangle(xy, fill=None, outline=None)
-    # xy:[[x0，y0)，(x1，y1)]或[x0，y0，x1，y1]的序列
-    # outline: 用于画轮廓的颜色
-    # fill: 填充的颜色
-    draw.rectangle([(anchors[index, 1], anchors[index, 0]), (anchors[index, 3], anchors[index, 2])], outline=(255, 0, 0)), #  9个红色框
-img.show()
+# for index in range(15000, 15009):
+# # for index in range(len(anchors)):
+#     # PIL.ImageDraw.Draw.rectangle(xy, fill=None, outline=None)
+#     # xy:[[x0，y0)，(x1，y1)]或[x0，y0，x1，y1]的序列
+#     # outline: 用于画轮廓的颜色
+#     # fill: 填充的颜色
+#     draw.rectangle([(anchors[index, 1], anchors[index, 0]), (anchors[index, 3], anchors[index, 2])], outline=(255, 0, 0)), #  9个红色框
+# img.show()
 
 # 假设 图片中的两个目标框"ground-truth"
 bbox = np.asarray([[20, 30, 400, 500], [300, 400, 500, 600]], dtype=np.float32) # [y1, x1, y2, x2] format
-draw.rectangle([(30, 20), (500, 400)], outline=(100, 255, 0))
-draw.rectangle([(400, 300), (600, 500)], outline=(100, 255, 0)) # 绿色框
+# draw.rectangle([(30, 20), (500, 400)], outline=(100, 255, 0))
+# draw.rectangle([(400, 300), (600, 500)], outline=(100, 255, 0)) # 绿色框
 
 # 假设 图片中两个目标框分别对应的标签
 labels = np.asarray([6, 8], dtype=np.int8)  # 0 represents background
@@ -190,10 +190,10 @@ print(max_ious.shape)  # (8940,),每个anchor框内都会有一个最大值
 #          gt_max_ious中保存是 每个 gt-bbox 与 有效anchors框的 最大iou值 (2,)
 gt_argmax_ious = np.where(ious == gt_max_ious)[0]  # 根据上面获取的目标最大IOU值，获取等于该值的index
 print(gt_argmax_ious.shape)  # (18,) 共计18个
-for index in gt_argmax_ious:
-    draw.rectangle([(valid_anchor_boxes[index, 1], valid_anchor_boxes[index, 0]),
-                    (valid_anchor_boxes[index, 3], valid_anchor_boxes[index, 2])], outline=(0, 0, 205)) #设置为蓝色框
-img.show()
+# for index in gt_argmax_ious:
+#     draw.rectangle([(valid_anchor_boxes[index, 1], valid_anchor_boxes[index, 0]),
+#                     (valid_anchor_boxes[index, 3], valid_anchor_boxes[index, 2])], outline=(0, 0, 205)) #设置为蓝色框
+# img.show()
 #
 
 # 获取有效anchor（即边框都在图片内的anchor）的坐标
@@ -353,7 +353,7 @@ print(pred_cls_scores.shape, pred_anchor_locs.shape)  # ((1L, 18L, 50L, 50L), (1
 # torch.permute() 维度交换
 # 当调用contiguous()时，会强制拷贝一份tensor，让它的布局和从头创建的一模一样，但是两个tensor完全没有联系
 pred_anchor_locs = pred_anchor_locs.permute(0, 2, 3, 1).contiguous().view(1, -1, 4)
-print(pred_anchor_locs.shape)
+print('pred_anchor_locs.shape: ', pred_anchor_locs.shape) # 保存着预测的坐标变换系数格式为  (dy,dx,dh,dw)
 #Out: torch.Size([1, 22500, 4])
 
 pred_cls_scores = pred_cls_scores.permute(0, 2, 3, 1).contiguous()
@@ -365,7 +365,7 @@ print(objectness_score.shape)
 #Out torch.Size([1, 22500])
 
 pred_cls_scores = pred_cls_scores.view(1, -1, 2)
-print(pred_cls_scores.shapecc)
+print(pred_cls_scores.shape)
 # Out torch.size([1, 22500, 2])
 
 
@@ -378,198 +378,237 @@ n_test_post_nms = 300
 min_size = 16
 #
 # 转换anchor格式从 y1, x1, y2, x2 到 ctr_x, ctr_y, h, w ：
-anc_height = anchors[:, 2] - anchors[:, 0]
+anc_height = anchors[:, 2] - anchors[:, 0] # (1, )
 anc_width = anchors[:, 3] - anchors[:, 1]
 anc_ctr_y = anchors[:, 0] + 0.5 * anc_height
 anc_ctr_x = anchors[:, 1] + 0.5 * anc_width
 
 #
 # 根据预测的四个系数，将anchor框通过平移和缩放转化为预测的目标框
-# pred_anchor_locs 保存着 主干网络特征output输出后 经过3*3卷积后的特征，再经过 1*1卷积层 输出的 预测anchors的 bbox偏移量 (1L, 36L, 50L, 50L)  , (dy,dx,dh,dw)
-# objectness_score 保存着 主干网络特征output输出后 经过3*3卷积后的特征，再经过 1*1卷积层 输出的 预测anchors的 positive 和 negative分类(1L, 18L, 50L, 50L), (dy,dx,dh,dw)
-pred_anchor_locs_numpy = pred_anchor_locs[0].data.numpy()
-objectness_score_numpy = objectness_score[0].data.numpy()
+# pred_anchor_locs 保存着 主干网络特征output输出后 经过3*3卷积后的特征，再经过 1*1卷积层 输出的 预测anchors的 bbox偏移系数 #Out: torch.Size([1, 22500, 4]) ,
+# objectness_score 保存着 主干网络特征output输出后 经过3*3卷积后的特征，再经过 1*1卷积层 输出的 预测anchors的 positive 和 negative分类## Out torch.Size([1, 22500])
+pred_anchor_locs_numpy = pred_anchor_locs[0].data.cpu().numpy() #pred_anchor_locs[0],返回第0维, .data 返回其中的数据
+objectness_score_numpy = objectness_score[0].data.cpu().numpy()
+
 dy = pred_anchor_locs_numpy[:, 0::4]
 dx = pred_anchor_locs_numpy[:, 1::4]
 dh = pred_anchor_locs_numpy[:, 2::4]
 dw = pred_anchor_locs_numpy[:, 3::4]
 
-ctr_y = dy * anc_height[:, np.newaxis] + anc_ctr_y[:, np.newaxis]
+# 把anchor转换为预测框，(根据前面提到的经过1*1卷积 输出的 偏移系数)
+ctr_y = dy * anc_height[:, np.newaxis] + anc_ctr_y[:, np.newaxis]  # 张量的乘积(需要维度一致)各元素相乘(两个张量同行同列), np.newaxis 在指定维度上 增加一个维度
 ctr_x = dx * anc_width[:, np.newaxis] + anc_ctr_x[:, np.newaxis]
 h = np.exp(dh) * anc_height[:, np.newaxis]
 w = np.exp(dw) * anc_width[:, np.newaxis]
 #
-# #  将预测的目标框转换为[y1, x1, y2, x2]格式
-# roi = np.zeros(pred_anchor_locs_numpy.shape, dtype=pred_anchor_locs_numpy.dtype)
-# roi[:, 0::4] = ctr_y - 0.5 * h
-# roi[:, 1::4] = ctr_x - 0.5 * w
-# roi[:, 2::4] = ctr_y + 0.5 * h
-# roi[:, 3::4] = ctr_x + 0.5 * w
+#  将预测的目标框转换为[y1, x1, y2, x2]格式
+roi = np.zeros(pred_anchor_locs_numpy.shape, dtype=pred_anchor_locs_numpy.dtype)
+roi[:, 0::4] = ctr_y - 0.5 * h
+roi[:, 1::4] = ctr_x - 0.5 * w
+roi[:, 2::4] = ctr_y + 0.5 * h
+roi[:, 3::4] = ctr_x + 0.5 * w
+
 #
+# 剪辑 预测框到图像上
+img_size = (800, 800) #Image size
+# slice(start, stop, step)
+# np.clip(a,a_min,a_max) 将将数组中的元素限制在a_min, a_max之间，
+# 大于a_max的就使得它等于 a_max，小于a_min,的就使得它等于a_min.
+# roi 中保存着预测的目标框的坐标(22500,4),   坐标形式(y1,x1,y2,x2) ,自己备注
+# 保证预测框的坐标全部落在图片中，y1,y2在（0, img_size[0]）之间, x1,x2在（0, img_size[1]）之间
+roi[:, slice(0, 4, 2)] = np.clip(roi[:, slice(0, 4, 2)], 0, img_size[0])
+roi[:, slice(1, 4, 2)] = np.clip(roi[:, slice(1, 4, 2)], 0, img_size[1])
+print(roi.shape)  # (22500, 4)
+
+#  去除高度或宽度 < threshold的预测框 （疑问：这样会不会忽略小目标）
+hs = roi[:, 2] - roi[:, 0]
+ws = roi[:, 3] - roi[:, 1]
+keep = np.where((hs >= min_size) & (ws >= min_size))[0] # 有效 预测框的 Index
+print('keep.shape: ', keep.shape)  # (22500,)
+
+roi = roi[keep, :]
+# objectness_score 保存着 主干网络特征output输出后 经过3*3卷积后的特征，再经过 1*1卷积层 输出的 预测anchors的 positive 和 negative分类## Out torch.Size([1, 22500])
+score = objectness_score_numpy[keep]  # score 保存了 有效预测框的 分类分数
+
+# 按分数从高到低排序所有的（proposal, score）对
+#  ravel()方法将数组维度拉成一维数组         自己备注
+#  argsort() 从小到大排序，返回索引数组      自己备注
+order = score.ravel().argsort()[::-1]
+print(order.shape)  # (22500,)
 #
-# # 剪辑 预测框到图像上
-# img_size = (800, 800) #Image size
-# roi[:, slice(0, 4, 2)] = np.clip(roi[:, slice(0, 4, 2)], 0, img_size[0])
-# roi[:, slice(1, 4, 2)] = np.clip(roi[:, slice(1, 4, 2)], 0, img_size[1])
-# print(roi.shape)  # (22500, 4)
+# 取前几个预测框pre_nms_topN(如训练时12000，测试时300)
+order = order[:n_train_pre_nms]  # n_train_pre_nms: 12000
+roi = roi[order, :]
+print(roi.shape)  # (12000, 4)
+
+# nms（非极大抑制）计算： (去除和极大值anchor框IOU大于0.7的框——即去除相交的框，保留score大，且基本无相交的框)
+nms_thresh = 0.7
+#  roi中保存着 anchors根据 转换系数(由1*1卷积输出的转换系数) ，把anchors 转换成 有效预测框
+y1 = roi[:, 0]
+x1 = roi[:, 1]
+y2 = roi[:, 2]
+x2 = roi[:, 3]
+
+areas = (x2 - x1 + 1) * (y2 - y1 + 1) # 计算预测框的面积
+
+score = score[order]
+order = score.argsort()[::-1]
+print(order)  # [11999  3996  4005 ...  7995  7994     0]
+print('order.shape: ', order.shape) #  (12000,)
+keep = []
+# j = 0 计数循环次数
+while order.size > 0:   # order中保存着预测(候选)框的分类置信度分数的前12000个分数的index，从高到低排列
+    i = order[0] # i 是还未处理的图片中的最大评分的 index
+    keep.append(i) # 保留该图片的值
+    # 图片i分别与其余图片相交的矩形的坐标
+    xx1 = np.maximum(x1[i], x1[order[1:]])
+    yy1 = np.maximum(y1[i], y1[order[1:]])
+    # (y1, x1, y2, x2)
+    xx2 = np.minimum(x2[i], x2[order[1:]])
+    yy2 = np.minimum(y2[i], y2[order[1:]])
+    # 计算出各个相交矩形的面积,不重叠时为0
+    w = np.maximum(0.0, xx2 - xx1 + 1)
+    h = np.maximum(0.0, yy2 - yy1 + 1)
+    inter = w * h
+    # 计算重叠比例
+    ovr = inter / (areas[i] + areas[order[1:]] - inter)
+
+    # 只保留比例小于阈值的图片，然后继续处理
+    # nms_thresh=0.7
+    inds = np.where(ovr <= nms_thresh)[0]
+    # 因为ovr数组的长度比order数组少一个, 所以这里要将所有下标后移一位
+    order = order[inds + 1] # 这里加1是因为在计算IOU时，把序列的第一个忽略了（如上面的order[1:])
+    # print('order.size = ', order.size)
+    # j += 1
+
+# print('j = ', j) # 1758
+print('len(keep): ', len(keep)) # 1758
+#  n_train_post_nms=2000
+keep = keep[:n_train_post_nms]  # while training/testing , use accordingly
+roi = roi[keep]  # the final region proposals（region proposals表示预测目标框）
+print(roi.shape)  # (1758, 4)
+
 #
-# #  去除高度或宽度 < threshold的预测框 （疑问：这样会不会忽略小目标）
-# hs = roi[:, 2] - roi[:, 0]
-# ws = roi[:, 3] - roi[:, 1]
-# keep = np.where((hs >= min_size) & (ws >= min_size))[0]
-# roi = roi[keep, :]
-# score = objectness_score_numpy[keep]
+# Proposal targets
+n_sample = 128
+
+pos_ratio = 0.25
+pos_iou_thresh = 0.5
+
+neg_iou_thresh_hi = 0.5
+neg_iou_thresh_lo = 0.0
+
+# 找到每个ground-truth目标（真实目标框）与region proposal（预测目标框）的iou
+ious = np.empty((len(roi), 2), dtype=np.float32)
+ious.fill(0)
+
+for num1, i in enumerate(roi):
+   ya1, xa1, ya2, xa2 = i
+   anchor_area = (ya2 - ya1) * (xa2 - xa1)
+
+   for num2, j in enumerate(bbox):
+       yb1, xb1, yb2, xb2 = j
+       box_area = (yb2 - yb1) * (xb2 - xb1)
+
+       inter_x1 = max([xb1, xa1])
+       inter_y1 = max([yb1, ya1])
+
+       inter_x2 = min([xb2, xa2])
+       inter_y2 = min([yb2, ya2])
+
+       if (inter_x1 < inter_x2) and (inter_y1 < inter_y2):
+           iter_area = (inter_y2 - inter_y1) * (inter_x2 - inter_x1)
+           iou = iter_area / (anchor_area + box_area - iter_area)
+       else:
+           iou = 0.
+
+       ious[num1, num2] = iou
+print(ious.shape)  # (1758, 2)
+
+# 找到与每个region proposal具有较高IoU的ground truth，并且找到最大的IoU
+gt_assignment = ious.argmax(axis=1) # 找出每个region proposal 较大iou的 gt-bbox
+max_iou = ious.max(axis=1)  # 找出与之对应的gt-bbox的最大iou的值
+print(gt_assignment)  # [0 0 1 ... 0 0 0]
+print(max_iou)  # [0.17802152 0.17926688 0.04676317 ... 0.         0.         0.        ]
+
 #
-# # 按分数从高到低排序所有的（proposal, score）对
-# order = score.ravel().argsort()[::-1]
-# print(order.shape)  # (22500,)
-#
-# # 取前几个预测框pre_nms_topN(如训练时12000，测试时300)
-# order = order[:n_train_pre_nms]
-# roi = roi[order, :]
-# print(roi.shape)  # (12000, 4)
-#
-# # nms（非极大抑制）计算： (去除和极大值anchor框IOU大于0.7的框——即去除相交的框，保留score大，且基本无相交的框)
-# nms_thresh = 0.7
-# y1 = roi[:, 0]
-# x1 = roi[:, 1]
-# y2 = roi[:, 2]
-# x2 = roi[:, 3]
-#
-# areas = (x2 - x1 + 1) * (y2 - y1 + 1)
-#
-# score = score[order]
-# order = score.argsort()[::-1]
-# print(order)  # [11999  3996  4005 ...  7995  7994     0]
-# keep = []
-# while order.size > 0:
-#     i = order[0]
-#     keep.append(i)
-#     xx1 = np.maximum(x1[i], x1[order[1:]])
-#     yy1 = np.maximum(y1[i], y1[order[1:]])
-#     xx2 = np.minimum(x2[i], x2[order[1:]])
-#     yy2 = np.minimum(y2[i], y2[order[1:]])
-#
-#     w = np.maximum(0.0, xx2 - xx1 + 1)
-#     h = np.maximum(0.0, yy2 - yy1 + 1)
-#     inter = w * h
-#     ovr = inter / (areas[i] + areas[order[1:]] - inter)
-#
-#     inds = np.where(ovr <= nms_thresh)[0]
-#     order = order[inds + 1]
-#     # print ovr
-#     # print order
-#
-# keep = keep[:n_train_post_nms]  # while training/testing , use accordingly
-# roi = roi[keep]  # the final region proposals（region proposals表示预测目标框）
-# print(roi.shape)  # (1758, 4)
-#
-#
-# # Proposal targets
-# n_sample = 128
-# pos_ratio = 0.25
-# pos_iou_thresh = 0.5
-# neg_iou_thresh_hi = 0.5
-# neg_iou_thresh_lo = 0.0
-#
-# # 找到每个ground-truth目标（真实目标框）与region proposal（预测目标框）的iou
-# ious = np.empty((len(roi), 2), dtype=np.float32)
-# ious.fill(0)
-# for num1, i in enumerate(roi):
-#    ya1, xa1, ya2, xa2 = i
-#    anchor_area = (ya2 - ya1) * (xa2 - xa1)
-#    for num2, j in enumerate(bbox):
-#        yb1, xb1, yb2, xb2 = j
-#        box_area = (yb2 - yb1) * (xb2 - xb1)
-#
-#        inter_x1 = max([xb1, xa1])
-#        inter_y1 = max([yb1, ya1])
-#        inter_x2 = min([xb2, xa2])
-#        inter_y2 = min([yb2, ya2])
-#
-#        if (inter_x1 < inter_x2) and (inter_y1 < inter_y2):
-#            iter_area = (inter_y2 - inter_y1) * (inter_x2 - inter_x1)
-#            iou = iter_area / (anchor_area + box_area - iter_area)
-#        else:
-#            iou = 0.
-#
-#        ious[num1, num2] = iou
-# print(ious.shape)  # (1758, 2)
-#
-# # 找到与每个region proposal具有较高IoU的ground truth，并且找到最大的IoU
-# gt_assignment = ious.argmax(axis=1)
-# max_iou = ious.max(axis=1)
-# print(gt_assignment)  # [0 0 1 ... 0 0 0]
-# print(max_iou)  # [0.17802152 0.17926688 0.04676317 ... 0.         0.         0.        ]
-#
-#
-# # 为每个proposal分配标签：
-# gt_roi_label = labels[gt_assignment]
-# print(gt_roi_label)  # [6 6 8 ... 6 6 6]
-#
-# # 希望只保留n_sample*pos_ratio（128*0.25=32）个前景样本，因此如果只得到少于32个正样本，保持原状。
-# # 如果得到多余32个前景目标，从中采样32个样本
-# pos_roi_per_image = 32
-# pos_index = np.where(max_iou >= pos_iou_thresh)[0]
-# pos_roi_per_this_image = int(min(pos_roi_per_image, pos_index.size))
-# if pos_index.size > 0:
-#    pos_index = np.random.choice(pos_index, size=pos_roi_per_this_image, replace=False)
-# # print(pos_roi_per_this_image)
-# print(pos_index)  # 19
-#
-# # 针对负[背景]region proposal进行相似处理
-# neg_index = np.where((max_iou < neg_iou_thresh_hi) & (max_iou >= neg_iou_thresh_lo))[0]
-# neg_roi_per_this_image = n_sample - pos_roi_per_this_image
-# neg_roi_per_this_image = int(min(neg_roi_per_this_image, neg_index.size))
-# if neg_index.size > 0:
-#    neg_index = np.random.choice(neg_index, size=neg_roi_per_this_image, replace=False)
-# # print(neg_roi_per_this_image)
-# print(neg_index)  # 109
-#
-# keep_index = np.append(pos_index, neg_index)
-# gt_roi_labels = gt_roi_label[keep_index]
-# gt_roi_labels[pos_roi_per_this_image:] = 0  # negative labels --> 0
-# sample_roi = roi[keep_index]  # 预测框
-# print(sample_roi.shape)  # (128, 4)
-#
-#
-# bbox_for_sampled_roi = bbox[gt_assignment[keep_index]]  # 目标框
-# print(bbox_for_sampled_roi.shape)  # (128, 4)
-#
-#
-# # 根据上面得到的预测框和与之对应的目标框，计算4维参数（平移参数：dy, dx； 缩放参数：dh, dw）
-# height = sample_roi[:, 2] - sample_roi[:, 0]
-# width = sample_roi[:, 3] - sample_roi[:, 1]
-# ctr_y = sample_roi[:, 0] + 0.5 * height
-# ctr_x = sample_roi[:, 1] + 0.5 * width
-# base_height = bbox_for_sampled_roi[:, 2] - bbox_for_sampled_roi[:, 0]
-# base_width = bbox_for_sampled_roi[:, 3] - bbox_for_sampled_roi[:, 1]
-# base_ctr_y = bbox_for_sampled_roi[:, 0] + 0.5 * base_height
-# base_ctr_x = bbox_for_sampled_roi[:, 1] + 0.5 * base_width
-#
-# eps = np.finfo(height.dtype).eps
-# height = np.maximum(height, eps)
-# width = np.maximum(width, eps)
-#
-# dy = (base_ctr_y - ctr_y) / height
-# dx = (base_ctr_x - ctr_x) / width
-# dh = np.log(base_height / height)
-# dw = np.log(base_width / width)
-#
-# gt_roi_locs = np.vstack((dy, dx, dh, dw)).transpose()
-# print(gt_roi_locs.shape)
-#
-#
-# rois = torch.from_numpy(sample_roi).float()
-# roi_indices = 0 * np.ones((len(rois),), dtype=np.int32)
-# roi_indices = torch.from_numpy(roi_indices).float()
-# print(rois.shape, roi_indices.shape)  # torch.Size([128, 4]) torch.Size([128])
-#
-# indices_and_rois = torch.cat([roi_indices[:, None], rois], dim=1)
-# xy_indices_and_rois = indices_and_rois[:, [0, 2, 1, 4, 3]]
-# indices_and_rois = xy_indices_and_rois.contiguous()
-# print(xy_indices_and_rois.shape)  # torch.Size([128, 5])
-#
+# 为每个proposal分配标签：
+# labels: np.asarray([6, 8], dtype=np.int8)
+
+gt_roi_label = labels[gt_assignment] # gt_roi_label: 每个proposal对应的gt-bbox的label
+print(gt_roi_label)  # [6 6 8 ... 6 6 6]
+
+# 希望只保留n_sample*pos_ratio（128*0.25=32）个前景样本，因此如果只得到少于32个正样本，保持原状。
+# 如果得到多余32个前景目标，从中采样32个样本
+pos_roi_per_image = 32
+pos_index = np.where(max_iou >= pos_iou_thresh)[0] # 正样本阈值，pos_iou_thresh: 0.5
+pos_roi_per_this_image = int(min(pos_roi_per_image, pos_index.size))
+if pos_index.size > 0: # 如果得到多余32个前景目标，从中随机采样32个样本
+   pos_index = np.random.choice(pos_index, size=pos_roi_per_this_image, replace=False)
+# print(pos_roi_per_this_image)
+print(pos_index)  # 19
+
+# 针对负[背景]region proposal进行相似处理 # (即与(不同的)gt-bbox的最大iou值 小于负样本的最大iou阈值，大于 最小负样本的最小iou阈值)
+neg_index = np.where((max_iou < neg_iou_thresh_hi) & (max_iou >= neg_iou_thresh_lo))[0]
+
+neg_roi_per_this_image = n_sample - pos_roi_per_this_image
+neg_roi_per_this_image = int(min(neg_roi_per_this_image, neg_index.size))
+if neg_index.size > 0:
+   neg_index = np.random.choice(neg_index, size=neg_roi_per_this_image, replace=False)
+# print(neg_roi_per_this_image)
+print(neg_index)  # 109
+
+keep_index = np.append(pos_index, neg_index) # keep_index中保存着正负 候选框 样本的下标
+
+gt_roi_labels = gt_roi_label[keep_index] # gt_roi_label: 每个proposal对应的gt-bbox的label
+gt_roi_labels[pos_roi_per_this_image:] = 0  # negative labels --> 0
+sample_roi = roi[keep_index]  # 预测框
+print(sample_roi.shape)  # (128, 4)
+
+# gt_assignment:ious.argmax(axis=1) 保存着候选框对应的最大iou的 gt-bbox 的index
+# keep_index 保存着 正负候选框 样本的下标   ,样本总数：128
+bbox_for_sampled_roi = bbox[gt_assignment[keep_index]]  # 目标框
+print(bbox_for_sampled_roi.shape)  # (128, 4)
+
+
+# 根据上面得到的预测框和与之对应的目标框，计算4维参数（平移参数：dy, dx； 缩放参数：dh, dw）
+height = sample_roi[:, 2] - sample_roi[:, 0]
+width = sample_roi[:, 3] - sample_roi[:, 1]
+
+ctr_y = sample_roi[:, 0] + 0.5 * height
+ctr_x = sample_roi[:, 1] + 0.5 * width
+
+base_height = bbox_for_sampled_roi[:, 2] - bbox_for_sampled_roi[:, 0]
+base_width = bbox_for_sampled_roi[:, 3] - bbox_for_sampled_roi[:, 1]
+base_ctr_y = bbox_for_sampled_roi[:, 0] + 0.5 * base_height
+base_ctr_x = bbox_for_sampled_roi[:, 1] + 0.5 * base_width
+
+eps = np.finfo(height.dtype).eps
+height = np.maximum(height, eps)
+width = np.maximum(width, eps)
+
+dy = (base_ctr_y - ctr_y) / height
+dx = (base_ctr_x - ctr_x) / width
+dh = np.log(base_height / height)
+dw = np.log(base_width / width)
+
+gt_roi_locs = np.vstack((dy, dx, dh, dw)).transpose()
+print(gt_roi_locs.shape)
+
+
+rois = torch.from_numpy(sample_roi).float()
+roi_indices = 0 * np.ones((len(rois),), dtype=np.int32)
+roi_indices = torch.from_numpy(roi_indices).float()
+print(rois.shape, roi_indices.shape)  # torch.Size([128, 4]) torch.Size([128])
+
+# torch.cat([tensor],dim=0 or 1 ...)
+# 需要拼接的tensor 列表表示, dim = 0 表示列的拼接， dim = 1表示行的拼接
+indices_and_rois = torch.cat([roi_indices[:, None], rois], dim=1)
+
+xy_indices_and_rois = indices_and_rois[:, [0, 2, 1, 4, 3]]
+indices_and_rois = xy_indices_and_rois.contiguous()
+print(xy_indices_and_rois.shape)  # torch.Size([128, 5])
+
 # # 设计大小为7x7的roi_pooling层
 # size = (7, 7)
 # adaptive_max_pool = torch.nn.AdaptiveMaxPool2d(size[0], size[1])
