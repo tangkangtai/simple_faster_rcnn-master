@@ -20,6 +20,7 @@ print("output:", output.size())
 # 最大池化
 # pool = nn.MaxPool1d(kernel_size=35-3+1)
 output = output.squeeze(3)
+print('output.shape: ', output.shape)
 pool1d_value = F.max_pool1d(output, output.size(2))
 print("最大池化输出：", pool1d_value.size())
 

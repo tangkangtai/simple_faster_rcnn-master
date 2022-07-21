@@ -246,14 +246,21 @@ def test13():
     print(y)
 
 def torch_narrow_test():
-    data = torch.arange(12).reshape(-1,6)
+    """
+      下方 pytorch.narrow(self, dim, start, length)
+       dim表示哪一个维度开始, 0表示我要对行操作, 1表示我要对列操作
+       start:第二个参数表示开始位置
+       length: 取得个数
+    """
+    roi = torch.arange(30).reshape(6, 5)
     # torch.from_numpy() # 用来将数组array转换为张量
     # data_to_numpy = data.numpy() # 张量转成数组
     # data_to_list = data.tolist() # 张量转成列表 && 或者 list(data)
     # data.item() # 张量转成数值
-    print('data: ', data)
-    narrow1 = data.narrow(1, 3, 3)
-    print("narrow_data: ", narrow1)
+    print('roi: ', roi)
+    narrow1= roi.narrow(0, 0, 1)[0]
+    print('narrow1: ', narrow1)
+
 
 def slice_test_roi():
     reshape = torch.arange(5 * 20 * 20).reshape(-1, 20, 20) # tensor (5, 4, 4)
@@ -410,9 +417,9 @@ if __name__ == '__main__':
     # cat_test()
     # test14()
     # test15()
-    # test16()
+    test16()
     # test17()
     # test5()
     # tensor_mutiple_test()
     # new_axis_test()
-    test_list_index()
+    # test_list_index()

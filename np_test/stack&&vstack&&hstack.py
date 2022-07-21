@@ -4,6 +4,20 @@ import numpy as np
 def satck_test():
     a = [[1, 2, 3],
          [4, 5, 6]]
+    # print(a)
+    #==================================================
+    # a_ = np.stack(a, axis=0)
+    # print(a_)
+    # print(a_.shape)
+    # a_ = np.stack(a, axis=1)
+    # print(a_)
+    # print(a_.shape)
+
+#============================================================
+    # arrays = [np.random.randn(3, 4) for _ in range(10)] # _起到循环标志作用, 即生成 10个(3,4)数组
+    # print(arrays)
+    # print(arrays[0].shape)
+#--------------------------------------------------------
     b = [[1, 2, 3],
          [4, 5, 6]]
     c = [[1, 2, 3],
@@ -12,10 +26,13 @@ def satck_test():
     print("b=", b)
     print("c=", c)
     d = np.stack((a, b, c), axis=0)
+    print('axis=0后shape = ', d.shape)
     print('"axis=0":\n', d)
     d = np.stack((a, b, c), axis=1)
+    print('axis=1后shape = ', d.shape)
     print('"axis=1":\n', d)
     d = np.stack((a, b, c), axis=2)
+    print('axis=2后shape = ', d.shape)
     print('"axis=2":\n', d)
 
 def hstack1():
@@ -73,6 +90,9 @@ def vstack3():
 if __name__ == '__main__':
     # satck_test()
     # vstack1()
+    # vstack2()
+    vstack3()
     # hstack2()
+
     # hstack1()
-    pass
+    # pass

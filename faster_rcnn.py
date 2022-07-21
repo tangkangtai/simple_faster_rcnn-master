@@ -3,7 +3,7 @@
 import torch
 import torchvision
 import os
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+os.environ['CUDA_LAUNCH_BLOCKING'] = "0"
 from PIL import Image, ImageDraw
 import numpy as np
 
@@ -243,6 +243,7 @@ print(gt_argmax_ious.shape)  # (18,) 共计18个
 
 pos_iou_threshold = 0.7
 neg_iou_threshold = 0.3
+
 label = np.empty((len(valid_anchor_index), ), dtype=np.int32)
 label.fill(-1)
 print(label.shape)  # (8940,)
@@ -366,7 +367,7 @@ print(objectness_score.shape)
 
 pred_cls_scores = pred_cls_scores.view(1, -1, 2)
 print(pred_cls_scores.shape)
-# Out torch.size([1, 22500, 2])
+# Out torch.size([1, 22500, 2]) # 一共22500个anchors, 每个anchors对应的(前景)正样本(positive)和(背景)负样本(negative) ???
 
 
 # Generating proposals to feed Fast R-CNN network
@@ -427,7 +428,8 @@ keep = np.where((hs >= min_size) & (ws >= min_size))[0] # 有效 预测框的 In
 print('keep.shape: ', keep.shape)  # (22500,)
 
 roi = roi[keep, :]
-# objectness_score 保存着 主干网络特征output输出后 经过3*3卷积后的特征，再经过 1*1卷积层 输出的 预测anchors的 positive 和 negative分类## Out torch.Size([1, 22500])
+# objectness_score 保存着 主干网络特征output输出后 经过3*3卷积后的特征，
+# 再经过 1*1卷积层 输出的 预测anchors的 positive 和 negative分类## Out torch.Size([1, 22500])
 score = objectness_score_numpy[keep]  # score 保存了 有效预测框的 分类分数
 
 # 按分数从高到低排序所有的（proposal, score）对
@@ -592,182 +594,276 @@ dx = (base_ctr_x - ctr_x) / width
 dh = np.log(base_height / height)
 dw = np.log(base_width / width)
 
+# gt_roi_locs: 保存着 正负样本 回归 到 gt-bbox 框的 位移和变换系数
 gt_roi_locs = np.vstack((dy, dx, dh, dw)).transpose()
 print(gt_roi_locs.shape)
 
 
 rois = torch.from_numpy(sample_roi).float()
-roi_indices = 0 * np.ones((len(rois),), dtype=np.int32)
+roi_indices = 0 * np.ones((len(rois),), dtype=np.int32) # 128个0的数组
 roi_indices = torch.from_numpy(roi_indices).float()
+
 print(rois.shape, roi_indices.shape)  # torch.Size([128, 4]) torch.Size([128])
 
 # torch.cat([tensor],dim=0 or 1 ...)
 # 需要拼接的tensor 列表表示, dim = 0 表示列的拼接， dim = 1表示行的拼接
 indices_and_rois = torch.cat([roi_indices[:, None], rois], dim=1)
 
+#  rois : (y1, x1, y2, x2)
+# indices_and_rois: (roi_indices, x1, y1, x2, y2)
 xy_indices_and_rois = indices_and_rois[:, [0, 2, 1, 4, 3]]
+
 indices_and_rois = xy_indices_and_rois.contiguous()
 print(xy_indices_and_rois.shape)  # torch.Size([128, 5])
 
-# # 设计大小为7x7的roi_pooling层
-# size = (7, 7)
-# adaptive_max_pool = torch.nn.AdaptiveMaxPool2d(size[0], size[1])
-# output = []
-# rois = indices_and_rois.float()
-# rois[:, 1:].mul_(1/16.0)  # Subsampling ratio
-# rois = rois.long()
-# num_rois = rois.size(0)
-# for i in range(num_rois):
-#    roi = rois[i]
-#    im_idx = roi[0]
-#    im = out_map.narrow(0, im_idx, 1)[..., roi[2]:(roi[4]+1), roi[1]:(roi[3]+1)]
-#    # print adaptive_max_pool(im)[0].data.shape
-#    output.append(adaptive_max_pool(im)[0].data)
-# output = torch.stack(output)
+# 设计大小为7x7的roi_pooling层
+size = (7, 7)
+adaptive_max_pool = torch.nn.AdaptiveMaxPool2d(size[0], size[1])
+output = []
+rois = indices_and_rois.float() # [N,5]——>(index, x1, y1, x2, y2)
+"""
+# .mul_()矩阵乘法
+所有带"——"都是inplace的 意思就是操作后 原数也会改动
+不带 "——" 的 只在操作适时候改变数据，操作结束后数据变回原状
+"""
+rois[:, 1:].mul_(1/16.0)  # Subsampling ratio # 对预测框进行下采样，匹配特征图out_map
+rois = rois.long() # (128, 5)
+num_rois = rois.size(0) # 128
+
+for i in range(num_rois):
+   roi = rois[i] # roi.shape [5,] ,即取出每行的数据(每个proposal框)
+   im_idx = roi[0] # 图片的索引号
+   """
+   下方 pytorch.narrow(self, dim, start, length)
+    dim表示哪一个维度开始, 0表示我要对行操作, 1表示我要对列操作
+    start:第二个参数表示开始位置
+    length: 取得个数
+    # out_map: (batch_size, num, feature_size, feature_size) => (1, 512, 50, 50)
+   """
+   # 这一步是根据预测框的的(x1,y1, x2,y2)坐标，从特征图out_map中把目标实体抠出来//roi=(index, x1, y1, x2, y2)
+   im = out_map.narrow(0, im_idx, 1)[..., roi[2]:(roi[4]+1), roi[1]:(roi[3]+1)]
+   # print('im.shape', im.shape)
+   # print adaptive_max_pool(im)[0].data.shape
+   output.append(adaptive_max_pool(im)[0].data)
+
+# note: if your pytorch version is 0.3.1, you must run this:
+# output = torch.stack(output) # 维度衔接
+# output为list,其中保存着128个tensor,每个tensor为(1,512,7,7)
 # print(output.shape)
-# output = torch.cat(output, 0)
-# print(output.size())  # torch.Size([128, 512, 7, 7])
+
+# Classification 线性分类，预测预测框的类别，置信度和转为目标框的平移缩放系数（要与RPN区分）
+output = torch.cat(output, 0)
+print(output.size())  # torch.Size([128, 512, 7, 7])
+
+k = output.view(output.size(0), -1)
+print(k.shape)  # [128, 25088]
+
+# 分类层
+"""
+torch.nn.Linear(in_features, out_features, bias=True) 对输入数据做线性变换：y=Ax+b
+in_features: 每个输入样本的大小
+out_features: 每个输出样本的大小
+bias 若设置为False 这层不会学习偏置。默认为True
+输入: (N,in_features)
+输出： (N,out_features)
+
+y=x * A(转置) + b, x为输入层(所谓的w 权重)
+默认: weight参数采用了He-uniform初始化策略，而bias采用了简单的均匀分布初始化策略（均匀分布参数根据特征数计算）
+"""
+roi_head_classifier = nn.Sequential(*[nn.Linear(25088, 4096), nn.Linear(4096, 4096)])
+roi_head_classifier.to(device) # 加载到gpu
+
+cls_loc = nn.Linear(4096, 21 * 4)  # (VOC 20 classes + 1 background. Each will have 4 co-ordinates)
+cls_loc.weight.data.normal_(0, 0.01) # 均值为0, 方差为1
+cls_loc.bias.data.zero_()
+cls_loc.to(device) # 加载到gpu
+
+score = nn.Linear(4096, 21)  # (VOC 20 classes + 1 background)
+score.to(device) # 加载到gpu
+# k: [128, 25088]
+k = torch.autograd.Variable(k)
+k = roi_head_classifier(k) # 两个全连接层的 roi_head,输出 (128, 4096)
+
+# torch.Size([128, 84])  84 ==> (20+1)*4,表示每个框有20个候选类别和一个置信度（假设为VOC数据集，共20分类），4表示坐标信息
+roi_cls_loc = cls_loc(k)
+
+# roi_cls_score： [128, 21] 表示每个框的类别和置信度
+roi_cls_score = score(k)
+
+print(roi_cls_loc.data.shape, roi_cls_score.data.shape)  # torch.Size([128, 84]), torch.Size([128, 21])
+
+
+# #  Fast RCNN  RPN损失函数
+print(pred_anchor_locs.shape)  # torch.Size([1, 22500, 4])  # RPN网络预测anchor的坐标系数
+print(pred_cls_scores.shape)  # torch.Size([1, 22500, 2])   # RPN网络预测anchor的类别
+
+print(anchor_locations.shape)  # (22500, 4)  # anchor对应的实际坐标系数
+print('anchor_labels.shape: ', anchor_labels.shape)  # (22500,)       # anchor的实际类别  所有anchor框对应的label(-1：无效anchor，0：负例有效anchor，1：正例有效anchor）
+print(anchor_labels)
 #
-# k = output.view(output.size(0), -1)
-# print(k.shape)  # [128, 25088]
-#
-# # 分类层
-# roi_head_classifier = nn.Sequential(*[nn.Linear(25088, 4096),
-#                                       nn.Linear(4096, 4096)])
-# cls_loc = nn.Linear(4096, 21 * 4)  # (VOC 20 classes + 1 background. Each will have 4 co-ordinates)
-# cls_loc.weight.data.normal_(0, 0.01)
-# cls_loc.bias.data.zero_()
-# score = nn.Linear(4096, 21)  # (VOC 20 classes + 1 background)
-#
-# k = torch.autograd.Variable(k)
-# k = roi_head_classifier(k)
-# roi_cls_loc = cls_loc(k)
-# roi_cls_score = score(k)
-# print(roi_cls_loc.data.shape, roi_cls_score.data.shape)  # torch.Size([128, 84]), torch.Size([128, 21])
-#
-#
-# #  Fast RCNN 损失函数
-# print(pred_anchor_locs.shape)  # torch.Size([1, 22500, 4])  # RPN网络预测的坐标系数
-# print(pred_cls_scores.shape)  # torch.Size([1, 22500, 2])   # RPN网络预测的类别
-# print(anchor_locations.shape)  # (22500, 4)  # anchor对应的实际坐标系数
-# print(anchor_labels.shape)  # (22500,)       # anchor的实际类别
-#
-# # 我们将会从新排列，将输入和输出排成一行
-# rpn_loc = pred_anchor_locs[0]
-# rpn_score = pred_cls_scores[0]
-# gt_rpn_loc = torch.from_numpy(anchor_locations)
-# gt_rpn_score = torch.from_numpy(anchor_labels)
-# print(rpn_loc.shape, rpn_score.shape, gt_rpn_loc.shape, gt_rpn_score.shape)
-# # torch.Size([22500, 4]) torch.Size([22500, 2]) torch.Size([22500, 4]) torch.Size([22500])
-#
-# # 对与classification我们使用Cross Entropy损失
-# gt_rpn_score = torch.autograd.Variable(gt_rpn_score.long())
-# rpn_cls_loss = torch.nn.functional.cross_entropy(rpn_score, gt_rpn_score, ignore_index=-1)
-# print(rpn_cls_loss)  # Variable containing: 0.6931
-#
-# # 对于 Regression 我们使用smooth L1 损失
-# pos = gt_rpn_score.data > 0  # Regression 损失也被应用在有正标签的边界区域中
-# mask = pos.unsqueeze(1).expand_as(rpn_loc)
-# print(mask.shape)  # (22500L, 4L)
-#
-# # 现在取有正数标签的边界区域
-# mask_loc_preds = rpn_loc[mask].view(-1, 4)
-# mask_loc_targets = gt_rpn_loc[mask].view(-1, 4)
-# print(mask_loc_preds.shape, mask_loc_targets.shape)  # ((18L, 4L), (18L, 4L))
-#
-# # regression损失应用如下
-# x = np.abs(mask_loc_targets.numpy() - mask_loc_preds.data.numpy())
-# print(x.shape)  # (18, 4)
-# # print (x < 1)
-# rpn_loc_loss = ((x < 1) * 0.5 * x**2) + ((x >= 1) * (x-0.5))
-# # print rpn_loc_loss.shape  # (18, 4)
-# rpn_loc_loss = rpn_loc_loss.sum()  # 1.1628926242031001
-# print(rpn_loc_loss)
-# # print rpn_loc_loss.shape
-# # rpn_loc_loss = np.squeeze(rpn_loc_loss)
-# # print rpn_loc_loss
-#
-# N_reg = (gt_rpn_score > 0).float().sum()
-# N_reg = np.squeeze(N_reg.data.numpy())
-#
-# print("N_reg: {}, {}".format(N_reg, N_reg.shape))
-# rpn_loc_loss = rpn_loc_loss / N_reg
-# rpn_loc_loss = np.float32(rpn_loc_loss)
-# # rpn_loc_loss = torch.autograd.Variable(torch.from_numpy(rpn_loc_loss))
-# rpn_lambda = 10.
-# rpn_cls_loss = np.squeeze(rpn_cls_loss.data.numpy())
-# print("rpn_cls_loss: {}".format(rpn_cls_loss))  # 0.693146109581
-# print('rpn_loc_loss: {}'.format(rpn_loc_loss))  # 0.0646051466465
-# rpn_loss = rpn_cls_loss + (rpn_lambda * rpn_loc_loss)
-# print("rpn_loss: {}".format(rpn_loss))  # 1.33919757605
-#
-#
-# # Fast R-CNN 损失函数
-# # 预测
-# print(roi_cls_loc.shape)  # # torch.Size([128, 84])
-# print(roi_cls_score.shape)  # torch.Size([128, 21])
-#
-# # 真实
-# print(gt_roi_locs.shape)  # (128, 4)
-# print(gt_roi_labels.shape)  # (128, )
-#
-# gt_roi_loc = torch.from_numpy(gt_roi_locs)
-# gt_roi_label = torch.from_numpy(np.float32(gt_roi_labels)).long()
-# print(gt_roi_loc.shape, gt_roi_label.shape)  # torch.Size([128, 4]) torch.Size([128])
-#
+# 我们将会从新排列，将输入和输出排成一行
+rpn_loc = pred_anchor_locs[0] # (22500, 4) # 保存着预测的坐标变换系数格式为  (dy,dx,dh,dw)
+rpn_score = pred_cls_scores[0] # (22500, 2) # 一共22500个anchors, 每个anchors对应的(前景)正样本(positive)和(背景)负样本(negative) ???
+
+gt_rpn_loc = torch.from_numpy(anchor_locations)  # (22500, 4)
+
+gt_rpn_score = torch.from_numpy(anchor_labels) # (22500,)
+
+print(rpn_loc.shape, rpn_score.shape, gt_rpn_loc.shape, gt_rpn_score.shape)
+# torch.Size([22500, 4]) torch.Size([22500, 2]) torch.Size([22500, 4]) torch.Size([22500])
+
+# 对与classification我们使用Cross Entropy损失
+gt_rpn_score = torch.autograd.Variable(gt_rpn_score.long())
+# print(gt_rpn_score.is_cuda) # False
+
+# 就是data.to(device)后需要赋值给另一变量，可以是data本身，否者无法真正实现迁移。
+# 否则 单独调用data.to(device) 没用， 下面 交叉熵函数会报错
+gt_rpn_score = gt_rpn_score.to(device)
+
+
+# print(gt_rpn_score.is_cuda)
+# print(rpn_score.is_cuda) # True
+
+# rpn_score, torch.Size([22500, 2]):  pred_cls_scores = cls_layer(x)   # 分类层，判断该anchor是否可以捕获目标
+# 一共22500个anchors, 每个anchors对应的(前景)正样本(positive)和(背景)负样本(negative) ???
+# gt_rpn_score, torch.Size([22500]):  #  # anchor框内最大IOU值小于neg_iou_threshold，设为0, # anchor框有全局最大IOU值，设为1,  # anchor框内最大IOU值大于等于pos_iou_threshold，设为1
+rpn_cls_loss = torch.nn.functional.cross_entropy(rpn_score, gt_rpn_score, ignore_index=-1)
+
+
+print(rpn_cls_loss)  # Variable containing: 0.6931
+
+# 对于 Regression 我们使用smooth L1 损失
+# #  gt_rpn_score(anchor_labels)每个anchor框对应的label（-1：无效anchor，0：负例有效anchor，1：正例有效anchor）
+pos = gt_rpn_score.data > 0  # Regression 损失也被应用在有正标签的边界区域中
+print('pos.shape:', pos.shape) # (22500)
+print('pos: ', pos) # ([False,False.......])
+mask = pos.unsqueeze(1).expand_as(rpn_loc) # rpn_loc: torch.Size([22500, 4])
+print(mask.shape)  # (22500L, 4L)
+# print('mask: ', mask)
+
+# 现在取有正数标签的边界区域
+# rpn_loc: torch.Size([22500, 4]) 保存着预测的坐标变换系数格式为  (dy,dx,dh,dw)
+mask_loc_preds = rpn_loc[mask].view(-1, 4) # rpn_loc: torch.Size([22500, 4])
+mask_loc_targets = gt_rpn_loc[mask].view(-1, 4) # gt_rpn_loc: torch.Size([22500, 4]) # 保存的是 positive anchor与ground truth之间的平移量与尺度因子
+print(mask_loc_preds.shape, mask_loc_targets.shape)  # ((18L, 4L), (18L, 4L))
+
+# regression损失应用如下
+# smooth-L1 损失
+mask_loc_targets = mask_loc_targets.cpu() # 数据转到cpu
+mask_loc_preds = mask_loc_preds.cpu()
+
+x = np.abs(mask_loc_targets.numpy() - mask_loc_preds.data.numpy())
+print(x.shape)  # (18, 4)
+# print (x < 1)
+rpn_loc_loss = ((x < 1) * 0.5 * x**2) + ((x >= 1) * (x-0.5))
+# print rpn_loc_loss.shape  # (18, 4)
+rpn_loc_loss = rpn_loc_loss.sum()  # 1.1628926242031001
+print(rpn_loc_loss)
+# print rpn_loc_loss.shape
+# rpn_loc_loss = np.squeeze(rpn_loc_loss)
+# print rpn_loc_loss
+# gt_rpn_score(anchor_labels)每个anchor框对应的label（-1：无效anchor，0：负例有效anchor，1：正例有效anchor）
+N_reg = (gt_rpn_score > 0).float().sum()
+N_reg = N_reg.cpu() # 数据加载到gpu
+N_reg = np.squeeze(N_reg.data.numpy())
+# print(type(N_reg)) # numpy.ndarray
+print("N_reg: {}, {}".format(N_reg, N_reg.shape)) # 18, ()
+rpn_loc_loss = rpn_loc_loss / N_reg
+rpn_loc_loss = np.float32(rpn_loc_loss)
+# rpn_loc_loss = torch.autograd.Variable(torch.from_numpy(rpn_loc_loss))
+
+rpn_lambda = 10. # wieght
+
+rpn_cls_loss = rpn_cls_loss.cpu()
+
+rpn_cls_loss = np.squeeze(rpn_cls_loss.data.numpy())
+print("rpn_cls_loss: {}".format(rpn_cls_loss))  # 0.693146109581
+print('rpn_loc_loss: {}'.format(rpn_loc_loss))  # 0.0646051466465
+# rpn 损失是 分类损失 ＋ weight * 回归损失
+rpn_loss = rpn_cls_loss + (rpn_lambda * rpn_loc_loss)
+print("rpn_loss: {}".format(rpn_loss))  # 1.33919757605
+
+
+# Fast R-CNN 损失函数
+# 预测
+# roi_cls_loc: 全连接层后的输出 # torch.Size([128, 84])  84 ==> (20+1)*4,表示每个框有20个候选类别和一个置信度（假设为VOC数据集，共20分类），4表示坐标信息
+# pred_roi_labels： [128, 21] 表示每个框的类别和置信度
+print(roi_cls_loc.shape)  # # torch.Size([128, 84]) # 预测框的坐标系数
+print(roi_cls_score.shape)  # torch.Size([128, 21]) # 预测框所属类别和置信度
+
+# 真实
+print(gt_roi_locs.shape)  # (128, 4) # gt_roi_locs: 保存着 正负样本 回归 到 gt-bbox 框的 位移和变换系数
+print(gt_roi_labels.shape)  # (128, ) # gt_roi_label: 每个proposal对应的gt-bbox的label, 负样本label设为0了
+
+gt_roi_loc = torch.from_numpy(gt_roi_locs)
+gt_roi_label = torch.from_numpy(np.float32(gt_roi_labels)).long()
+print(gt_roi_loc.shape, gt_roi_label.shape)  # torch.Size([128, 4]) torch.Size([128])
+
 # # 分类损失
-# gt_roi_label = torch.autograd.Variable(gt_roi_label)
-# roi_cls_loss = torch.nn.functional.cross_entropy(roi_cls_score, gt_roi_label, ignore_index=-1)
-# print(roi_cls_loss)  # Variable containing:  3.0515
-#
-#
-# # 回归损失
-# n_sample = roi_cls_loc.shape[0]
-# roi_loc = roi_cls_loc.view(n_sample, -1, 4)
-# print(roi_loc.shape)  # (128L, 21L, 4L)
-#
-# roi_loc = roi_loc[torch.arange(0, n_sample).long(), gt_roi_label]
-# print(roi_loc.shape)  # torch.Size([128, 4])
-#
-#
-# # 用计算RPN网络回归损失的方法计算回归损失
-# # roi_loc_loss = REGLoss(roi_loc, gt_roi_loc)
-#
-# pos = gt_roi_label.data > 0  # Regression 损失也被应用在有正标签的边界区域中
-# mask = pos.unsqueeze(1).expand_as(roi_loc)
-# print(mask.shape)  # (128, 4L)
-#
-# # 现在取有正数标签的边界区域
-# mask_loc_preds = roi_loc[mask].view(-1, 4)
-# mask_loc_targets = gt_roi_loc[mask].view(-1, 4)
-# print(mask_loc_preds.shape, mask_loc_targets.shape)  # ((19L, 4L), (19L, 4L))
-#
-#
-# x = np.abs(mask_loc_targets.numpy() - mask_loc_preds.data.numpy())
-# print(x.shape)  # (19, 4)
-#
-# roi_loc_loss = ((x < 1) * 0.5 * x**2) + ((x >= 1) * (x-0.5))
-# print(roi_loc_loss.sum())  # 1.4645805211187053
-#
-#
-# N_reg = (gt_roi_label > 0).float().sum()
-# N_reg = np.squeeze(N_reg.data.numpy())
-# roi_loc_loss = roi_loc_loss.sum() / N_reg
-# roi_loc_loss = np.float32(roi_loc_loss)
-# print(roi_loc_loss)  # 0.077294916
-# # roi_loc_loss = torch.autograd.Variable(torch.from_numpy(roi_loc_loss))
-#
-#
-# # ROI损失总和
-# roi_lambda = 10.
-# roi_cls_loss = np.squeeze(roi_cls_loss.data.numpy())
-# roi_loss = roi_cls_loss + (roi_lambda * roi_loc_loss)
-# print(roi_loss)  # 3.810348778963089
-#
-#
-# total_loss = rpn_loss + roi_loss
-#
-# print(total_loss)  # 5.149546355009079
+gt_roi_label = torch.autograd.Variable(gt_roi_label)
+gt_roi_label = gt_roi_label.to(device) # 加载到gpu
+# print(roi_cls_score.is_cuda) # True
+# print(gt_roi_label.is_cuda) # False
+roi_cls_loss = torch.nn.functional.cross_entropy(roi_cls_score, gt_roi_label, ignore_index=-1)
+print(roi_cls_loss)  # Variable containing:  3.0515
+
+
+# 回归损失
+n_sample = roi_cls_loc.shape[0]
+roi_loc = roi_cls_loc.view(n_sample, -1, 4)
+print(roi_loc.shape)  # (128L, 21L, 4L) 128个 21*4的tensor
+# gt_roi_label: 每个proposal对应的gt-bbox的label, 负样本label设为0了。
+# 取 第i个 tensor里面的 第j个数据
+roi_loc = roi_loc[torch.arange(0, n_sample).long(), gt_roi_label]
+print(roi_loc.shape)  # torch.Size([128, 4])
+
+
+# 用计算RPN网络回归损失的方法计算回归损失
+# roi_loc_loss = REGLoss(roi_loc, gt_roi_loc)
+# gt_roi_label: 每个proposal对应的gt-bbox的label, 负样本label设为0了。
+# pos :[True,True......False]
+pos = gt_roi_label.data > 0  # Regression 损失也被应用在有正标签的边界区域中
+print('pos: ', pos)
+mask = pos.unsqueeze(1).expand_as(roi_loc)
+print(mask.shape)  # (128, 4L)
+
+# 现在取有正数标签的边界区域
+mask_loc_preds = roi_loc[mask].view(-1, 4)
+mask_loc_targets = gt_roi_loc[mask].view(-1, 4)
+print(mask_loc_preds.shape, mask_loc_targets.shape)  # ((19L, 4L), (19L, 4L))
+
+# 运算数据转到cpu
+mask_loc_targets = mask_loc_targets.cpu()
+mask_loc_preds = mask_loc_preds.cpu()
+
+
+# Smooth-L1 损失
+x = np.abs(mask_loc_targets.numpy() - mask_loc_preds.data.numpy())
+print(x.shape)  # (19, 4)
+
+roi_loc_loss = ((x < 1) * 0.5 * x**2) + ((x >= 1) * (x-0.5))
+print(roi_loc_loss.sum())  # 1.4645805211187053
+
+
+N_reg = (gt_roi_label > 0).float().sum()
+N_reg = np.squeeze(N_reg.data.numpy())
+
+roi_loc_loss = roi_loc_loss.sum() / N_reg
+roi_loc_loss = np.float32(roi_loc_loss)
+print(roi_loc_loss)  # 0.077294916
+roi_loc_loss = torch.autograd.Variable(torch.from_numpy(roi_loc_loss))
+
+
+# ROI损失总和
+roi_lambda = 10.
+roi_cls_loss = np.squeeze(roi_cls_loss.data.numpy())
+roi_loss = roi_cls_loss + (roi_lambda * roi_loc_loss)
+print(roi_loss)  # 3.810348778963089
+
+
+total_loss = rpn_loss + roi_loss
+
+print(total_loss)  # 5.149546355009079
 #
 #
 #
